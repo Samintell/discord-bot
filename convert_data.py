@@ -203,7 +203,9 @@ def get_romaji_override(title):
         'プリズム△▽リズム': 'Prism Rhythm',
         'ばかみたい【Taxi Driver Edition】': 'Baka Mitai',
         'ヴィラン': 'Villain',
-        'False Amber (from the Black Bazaar, Or by A Kervan Trader from the Lands Afar, Or Buried Beneath the Shifting Sands That Lead Everywhere but Nowhere)': 'False Amber'
+        'False Amber (from the Black Bazaar, Or by A Kervan Trader from the Lands Afar, Or Buried Beneath the Shifting Sands That Lead Everywhere but Nowhere)': 'False Amber',
+        'パラマウント☆ショータイム！！': 'Paramount Showtime!!'
+        'チルノのパーフェクトさんすう教室　⑨周年バージョン': 'Cirno\'s Perfect Math Class 9th Anniversary Version'
     }
     return romaji_overrides.get(title, None)
 

@@ -34,11 +34,12 @@ def normalize_string(text: str) -> str:
 def fuzzy_match(guess: str, target: str, threshold: float = 0.8) -> bool:
     """
     Check if guess matches target using fuzzy string matching.
+    More lenient for longer targets.
     
     Args:
         guess: User's guess
         target: Correct answer
-        threshold: Similarity threshold (0-1, default 0.8)
+        threshold: Base similarity threshold (0-1, default 0.8)
     
     Returns:
         True if match is found
@@ -49,8 +50,21 @@ def fuzzy_match(guess: str, target: str, threshold: float = 0.8) -> bool:
     if not guess_norm or not target_norm:
         return False
     
-    # Require minimum length (at least 3 characters or 40% of target length)
-    min_length = max(3, int(len(target_norm) * 0.4))
+    # Calculate minimum required length based on target length
+    # Short titles (< 10 chars): require 40% of length
+    # Medium titles (10-20 chars): require 35% of length  
+    # Long titles (20-40 chars): require 30% of length
+    # Very long titles (40+ chars): require 25% of length, min 10 chars
+    target_len = len(target_norm)
+    if target_len < 10:
+        min_length = max(3, int(target_len * 0.4))
+    elif target_len < 20:
+        min_length = max(4, int(target_len * 0.35))
+    elif target_len < 40:
+        min_length = max(6, int(target_len * 0.3))
+    else:
+        min_length = max(10, int(target_len * 0.25))
+    
     if len(guess_norm) < min_length:
         return False
     
@@ -61,6 +75,25 @@ def fuzzy_match(guess: str, target: str, threshold: float = 0.8) -> bool:
     # Check if target is a substring of guess
     if target_norm in guess_norm:
         return True
+    
+    # For long targets, also check if guess matches the START of the target
+    # This allows typing just the beginning of a long title
+    if target_len > 15 and len(guess_norm) >= 6:
+        if target_norm.startswith(guess_norm):
+            return True
+        # Also check first N characters with some leniency
+        check_len = min(len(guess_norm), len(target_norm))
+        start_similarity = SequenceMatcher(None, guess_norm[:check_len], target_norm[:check_len]).ratio()
+        if start_similarity >= 0.85:
+            return True
+    
+    # Adjust threshold based on target length (more lenient for longer targets)
+    if target_len > 30:
+        threshold = min(threshold, 0.65)
+    elif target_len > 20:
+        threshold = min(threshold, 0.7)
+    elif target_len > 15:
+        threshold = min(threshold, 0.75)
     
     # Use fuzzy matching for similarity
     similarity = SequenceMatcher(None, guess_norm, target_norm).ratio()
