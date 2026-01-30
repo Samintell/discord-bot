@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 from typing import List, Dict, Optional
 
+# Get the project root directory (parent of utils/)
+PROJECT_ROOT = Path(__file__).parent.parent
+
 def load_songs(
     difficulty: str = "master",
     category: Optional[str] = None,
@@ -22,10 +25,10 @@ def load_songs(
     Returns:
         List of unique songs (deduplicated by song_id)
     """
-    output_json = Path("output.json")
+    output_json = PROJECT_ROOT / "output.json"
     
     if not output_json.exists():
-        raise FileNotFoundError("output.json not found")
+        raise FileNotFoundError(f"output.json not found at {output_json}")
     
     with open(output_json, 'r', encoding='utf-8') as f:
         all_songs = json.load(f)
@@ -61,7 +64,7 @@ def get_song_image_path(song: Dict) -> Optional[Path]:
     if not image_name:
         return None
     
-    image_path = Path("images") / image_name
+    image_path = PROJECT_ROOT / "images" / image_name
     return image_path if image_path.exists() else None
 
 def get_song_audio_path(song: Dict) -> Optional[Path]:
@@ -72,7 +75,7 @@ def get_song_audio_path(song: Dict) -> Optional[Path]:
     
     # Audio files use same name as images but with .mp3 extension
     audio_name = image_name.replace('.png', '.mp3')
-    audio_path = Path("audio") / audio_name
+    audio_path = PROJECT_ROOT / "audio" / audio_name
     return audio_path if audio_path.exists() else None
 
 def get_available_categories() -> List[str]:
