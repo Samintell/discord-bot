@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import yt_dlp
 import sys
+import argparse
 
 # Configuration
 AUDIO_DIR = Path("audio")
@@ -15,6 +16,15 @@ OUTPUT_JSON = Path("output.json")
 AUDIO_FORMAT = "mp3"
 AUDIO_QUALITY = "5"  # 0=best, 9=worst
 PROGRESS_FILE = Path("manual_download_progress.json")
+
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="MaiMai Manual Audio Downloader")
+    parser.add_argument('--replace', '-r', action='store_true',
+                        help='Replace mode: search for and replace existing audio files')
+    parser.add_argument('--search', '-s', type=str, default=None,
+                        help='Search for a specific song by title/romaji (use with --replace)')
+    return parser.parse_args()
 
 # Create audio directory if it doesn't exist
 AUDIO_DIR.mkdir(exist_ok=True)
@@ -55,6 +65,33 @@ def find_missing_audio(songs):
             missing.append(song)
     
     return missing
+
+def search_songs(songs, query):
+    """Search songs by title, romaji, or artist."""
+    query_lower = query.lower()
+    results = []
+    
+    for song in songs:
+        title = song.get('title', '').lower()
+        romaji = song.get('romaji', '').lower()
+        artist = song.get('artist', '').lower()
+        
+        if query_lower in title or query_lower in romaji or query_lower in artist:
+            results.append(song)
+    
+    return results
+
+def find_songs_with_audio(songs):
+    """Find songs that have audio files (for replace mode)."""
+    with_audio = []
+    for song in songs:
+        audio_filename = get_audio_filename(song)
+        audio_path = AUDIO_DIR / audio_filename
+        
+        if audio_path.exists():
+            with_audio.append(song)
+    
+    return with_audio
 
 def download_audio(url, output_path):
     """Download audio from YouTube URL."""
@@ -120,17 +157,166 @@ def get_user_input(prompt):
     except KeyboardInterrupt:
         raise
 
-def main():
-    print("🎵 MaiMai Manual Audio Downloader")
+def replace_mode(songs, search_query=None):
+    """Replace mode: search for and replace existing audio files."""
+    print("\n🔄 REPLACE MODE")
     print("=" * 60)
-    print("This script allows you to manually provide YouTube links")
-    print("for songs that don't have audio files yet.")
+    print("Search for songs to replace their audio files.")
+    print("=" * 60)
+    
+    while True:
+        # Get search query
+        if search_query:
+            query = search_query
+            search_query = None  # Only use command-line search once
+        else:
+            query = get_user_input("\n🔍 Search for song (or 'q' to quit): ")
+        
+        if query is None or query.lower() == 'q':
+            print("\n👋 Exiting replace mode...")
+            return
+        
+        if not query:
+            print("  ⚠️  Please enter a search term")
+            continue
+        
+        # Search for matching songs
+        results = search_songs(songs, query)
+        
+        if not results:
+            print(f"  ❌ No songs found matching '{query}'")
+            continue
+        
+        # Show results
+        print(f"\n📋 Found {len(results)} matching song(s):")
+        for i, song in enumerate(results[:20], 1):  # Limit to 20 results
+            title = song.get('title', 'Unknown')
+            romaji = song.get('romaji', '')
+            artist = song.get('artist', 'Unknown')
+            audio_filename = get_audio_filename(song)
+            audio_path = AUDIO_DIR / audio_filename
+            has_audio = "✅" if audio_path.exists() else "❌"
+            
+            display_title = romaji if romaji else title
+            print(f"  {i}. [{has_audio}] {display_title} - {artist}")
+        
+        if len(results) > 20:
+            print(f"  ... and {len(results) - 20} more results")
+        
+        # Select song to replace
+        selection = get_user_input("\n🎯 Enter number to select (or 'b' to go back): ")
+        
+        if selection is None or selection.lower() == 'b' or selection.lower() == 'q':
+            continue
+        
+        try:
+            idx = int(selection) - 1
+            if idx < 0 or idx >= len(results):
+                print("  ⚠️  Invalid selection")
+                continue
+        except ValueError:
+            print("  ⚠️  Please enter a valid number")
+            continue
+        
+        # Selected song
+        song = results[idx]
+        title = song.get('title', 'Unknown')
+        romaji = song.get('romaji', '')
+        artist = song.get('artist', 'Unknown')
+        audio_filename = get_audio_filename(song)
+        audio_path = AUDIO_DIR / audio_filename
+        
+        print(f"\n{'=' * 60}")
+        print(f"Selected Song:")
+        print(f"  Title (JP):  {title}")
+        if romaji:
+            print(f"  Title (Rom): {romaji}")
+        print(f"  Artist:      {artist}")
+        print(f"  Filename:    {audio_filename}")
+        print(f"  Has Audio:   {'Yes' if audio_path.exists() else 'No'}")
+        print(f"{'=' * 60}")
+        
+        # Get YouTube URL
+        url = get_user_input("\n🔗 Enter YouTube URL (or 'b' to go back): ")
+        
+        if url is None or url.lower() == 'b':
+            continue
+        
+        if not url:
+            print("  ⚠️  No URL provided")
+            continue
+        
+        if not ('youtube.com' in url or 'youtu.be' in url):
+            print("  ⚠️  This doesn't look like a YouTube URL.")
+            continue
+        
+        # Delete existing file if it exists
+        if audio_path.exists():
+            confirm = get_user_input(f"  ⚠️  This will replace the existing file. Continue? (y/n): ")
+            if confirm is None or confirm.lower() != 'y':
+                print("  ⏭️  Cancelled")
+                continue
+            
+            try:
+                audio_path.unlink()
+                print(f"  🗑️  Deleted existing file: {audio_filename}")
+            except Exception as e:
+                print(f"  ❌ Failed to delete existing file: {e}")
+                continue
+        
+        # Download new audio
+        print(f"  📥 Downloading from: {url}")
+        
+        # Get list of mp3 files before download
+        files_before = {f: f.stat().st_mtime for f in AUDIO_DIR.glob('*.mp3')}
+        
+        if download_audio(url, audio_path):
+            import time
+            time.sleep(0.5)
+            
+            if audio_path.exists():
+                print(f"  ✅ Successfully saved: {audio_filename}")
+            else:
+                # Check for new files (yt-dlp may have sanitized the filename)
+                files_after = {f: f.stat().st_mtime for f in AUDIO_DIR.glob('*.mp3')}
+                new_files = [f for f, mtime in files_after.items() 
+                            if f not in files_before or mtime > files_before.get(f, 0)]
+                
+                if new_files:
+                    new_file = new_files[0]
+                    print(f"  🔄 Renaming '{new_file.name}' to '{audio_filename}'")
+                    try:
+                        new_file.rename(audio_path)
+                        print(f"  ✅ Successfully saved: {audio_filename}")
+                    except Exception as e:
+                        print(f"  ⚠️  Rename failed: {e}")
+                        print(f"  ✅ File saved as: {new_file.name}")
+                else:
+                    print(f"  ⚠️  Download completed but file not found")
+        else:
+            print(f"  ❌ Download failed")
+
+
+def main():
+    args = parse_args()
+    
+    print("🎵 MaiMai Manual Audio Downloader")
     print("=" * 60)
     
     # Load songs
     print("\n📂 Loading songs from output.json...")
     songs = load_songs()
     print(f"✅ Found {len(songs)} unique master difficulty songs")
+    
+    # Check for replace mode
+    if args.replace:
+        replace_mode(songs, args.search)
+        return
+    
+    print("This script allows you to manually provide YouTube links")
+    print("for songs that don't have audio files yet.")
+    print("\nTip: Use --replace or -r flag to replace existing audio files")
+    print("=" * 60)
     
     # Find missing audio
     print("\n🔍 Checking for missing audio files...")

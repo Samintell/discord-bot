@@ -9,6 +9,7 @@ import asyncio
 import random
 import io
 import json
+from PIL import Image
 from datetime import datetime
 from typing import Optional, Dict, List
 from pathlib import Path
@@ -64,6 +65,48 @@ class SkipButton(ui.View):
             item.disabled = True
 
 
+class PlayAgainButton(ui.View):
+    """View with a play again button for game end."""
+    
+    def __init__(self, cog, channel: discord.TextChannel, host_id: int, game_config: dict, timeout: float = 60):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.channel = channel
+        self.host_id = host_id
+        self.game_config = game_config
+        self.clicked = False
+    
+    @ui.button(label="Play Again", style=discord.ButtonStyle.primary, emoji="🔁")
+    async def play_again_button(self, interaction: discord.Interaction, button: ui.Button):
+        """Handle play again button press."""
+        # Only host can restart
+        if interaction.user.id != self.host_id:
+            await interaction.response.send_message("❌ Only the original host can restart the game!", ephemeral=True)
+            return
+        
+        # Check if a game is already running
+        if self.channel.id in self.cog.active_games or self.channel.id in self.cog.creating_games:
+            await interaction.response.send_message("❌ A game is already active in this channel!", ephemeral=True)
+            return
+        
+        if self.clicked:
+            await interaction.response.send_message("❌ Already starting a new game!", ephemeral=True)
+            return
+        
+        self.clicked = True
+        button.disabled = True
+        
+        # Acknowledge the interaction
+        await interaction.response.send_message("🔁 Starting new game with same settings...", ephemeral=True)
+        
+        # Start new game with same config
+        await self.cog.start_game_with_config(self.channel, interaction.user.id, self.game_config)
+    
+    async def on_timeout(self):
+        """Disable buttons on timeout."""
+        for item in self.children:
+            item.disabled = True
+
 class GameSession:
     """Represents an active quiz game session."""
     
@@ -75,6 +118,19 @@ class GameSession:
         self.time_limit = config.get('time_limit', 60)
         self.total_rounds = config.get('rounds', 10)
         self.snippet_length = config.get('snippet_length', 10)  # Audio snippet length in seconds
+        self.image_difficulty = config.get('image_difficulty', 'easy')  # 'easy', 'medium', 'hard'
+        
+        # Store original config for replay (without song_pool which changes)
+        self.original_config = {
+            'mode': self.mode,
+            'answer_type': self.answer_type,
+            'time_limit': self.time_limit,
+            'rounds': self.total_rounds,
+            'snippet_length': self.snippet_length,
+            'image_difficulty': self.image_difficulty,
+            'categories': config.get('categories'),
+            'versions': config.get('versions')
+        }
         
         self.current_round = 0
         self.song_pool: List[dict] = config.get('song_pool', [])
@@ -197,6 +253,48 @@ class QuizCog(commands.Cog):
         difficulty_type = song.get('difficulty', 'master')
         return f"Level {level} ({difficulty_type})"
     
+    def crop_image_for_difficulty(self, image_path: str, difficulty: str) -> io.BytesIO:
+        """Crop image based on difficulty level.
+        
+        Args:
+            image_path: Path to the original image
+            difficulty: 'easy' (full), 'medium' (25%), or 'hard' (10%)
+            
+        Returns:
+            BytesIO object containing the cropped PNG image
+        """
+        with Image.open(image_path) as img:
+            width, height = img.size
+            
+            if difficulty == 'easy':
+                # Full image
+                crop_width, crop_height = width, height
+                left, top = 0, 0
+            elif difficulty == 'medium':
+                # 25% of image (50% width x 50% height)
+                crop_width = width // 2
+                crop_height = height // 2
+                # Random position
+                left = random.randint(0, width - crop_width)
+                top = random.randint(0, height - crop_height)
+            else:  # hard
+                # 10% of image area (~31.6% of each dimension)
+                scale = 0.316  # sqrt(0.1) ≈ 0.316
+                crop_width = int(width * scale)
+                crop_height = int(height * scale)
+                # Random position
+                left = random.randint(0, width - crop_width)
+                top = random.randint(0, height - crop_height)
+            
+            # Crop the image
+            cropped = img.crop((left, top, left + crop_width, top + crop_height))
+            
+            # Save to BytesIO
+            output = io.BytesIO()
+            cropped.save(output, format='PNG')
+            output.seek(0)
+            return output
+
     @app_commands.command(name="quiz", description="Start a MaiMai song quiz game")
     @app_commands.describe(
         mode="Quiz mode",
@@ -204,6 +302,7 @@ class QuizCog(commands.Cog):
         rounds="Number of rounds to play (1-50)",
         time_limit="Seconds per round (10-300)",
         snippet_length="Audio snippet length in seconds (5-30, only for audio mode)",
+        image_difficulty="Image visibility (easy=full, medium=25%, hard=10%)",
         categories="Comma-separated (e.g. 'POPS＆アニメ,東方Project') or leave empty for all",
         versions="Comma-separated (e.g. 'FESTiVAL,BUDDiES,PRiSM') or leave empty for all"
     )
@@ -216,6 +315,11 @@ class QuizCog(commands.Cog):
         app_commands.Choice(name="Artist", value="artist"),
         app_commands.Choice(name="Difficulty Level", value="difficulty")
     ])
+    @app_commands.choices(image_difficulty=[
+        app_commands.Choice(name="Easy (full image)", value="easy"),
+        app_commands.Choice(name="Medium (25% of image)", value="medium"),
+        app_commands.Choice(name="Hard (10% of image)", value="hard")
+    ])
     async def quiz_start(
         self,
         interaction: discord.Interaction,
@@ -224,6 +328,7 @@ class QuizCog(commands.Cog):
         rounds: int = 10,
         time_limit: int = 20,
         snippet_length: int = 10,
+        image_difficulty: str = "easy",
         categories: Optional[str] = None,
         versions: Optional[str] = None
     ):
@@ -358,7 +463,10 @@ class QuizCog(commands.Cog):
                 'time_limit': time_limit,
                 'rounds': rounds,
                 'snippet_length': snippet_length,
-                'song_pool': song_pool
+                'image_difficulty': image_difficulty,
+                'song_pool': song_pool,
+                'categories': categories,  # Store original input for replay
+                'versions': versions  # Store original input for replay
             }
             
             game = GameSession(channel_id, interaction.user.id, config)
@@ -366,9 +474,14 @@ class QuizCog(commands.Cog):
             self.creating_games.discard(channel_id)  # Remove from creating set
             
             # Send game start message
+            difficulty_text = ""
+            if mode == 'image':
+                difficulty_labels = {'easy': 'Easy (full image)', 'medium': 'Medium (25%)', 'hard': 'Hard (10%)'}
+                difficulty_text = f"\n**Image Difficulty:** {difficulty_labels.get(image_difficulty, image_difficulty)}"
+            
             embed = discord.Embed(
                 title="🎵 MaiMai Song Quiz Started!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}",
                 color=discord.Color.blue()
             )
             
@@ -489,13 +602,14 @@ class QuizCog(commands.Cog):
             embed.add_field(name="📝 Title", value="???", inline=True)
         
         embed.add_field(name="⏱️ Time Limit", value=f"{game.time_limit}s", inline=True)
-        embed.set_footer(text=f"Category: {song.get('category', 'Unknown')}")
         
         # Add media
         if game.mode == 'image':
             image_path = get_song_image_path(song)
             if image_path:
-                file = discord.File(image_path, filename="cover.png")
+                # Crop image based on difficulty
+                cropped_image = self.crop_image_for_difficulty(image_path, game.image_difficulty)
+                file = discord.File(cropped_image, filename="cover.png")
                 embed.set_image(url="attachment://cover.png")
                 await channel.send(embed=embed, file=file, view=skip_view)
             else:
@@ -574,6 +688,11 @@ class QuizCog(commands.Cog):
             elif game.answer_type == 'artist':
                 embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
+            elif game.answer_type == 'difficulty':
+                title_display = song.get('romaji') or song.get('title', 'Unknown')
+                embed.add_field(name="Title", value=title_display, inline=False)
+                embed.add_field(name="Artist", value=artist, inline=False)
+                embed.add_field(name="Version", value=version, inline=True)
             
             # Add song image
             image_path = get_song_image_path(song)
@@ -637,7 +756,12 @@ class QuizCog(commands.Cog):
                 color=discord.Color.gold()
             )
             embed.add_field(name="Answer", value=correct_answer, inline=False)
-            if game.answer_type != 'difficulty':
+            if game.answer_type == 'difficulty':
+                title_display = song.get('romaji') or song.get('title', 'Unknown')
+                embed.add_field(name="Title", value=title_display, inline=False)
+                embed.add_field(name="Artist", value=artist, inline=False)
+                embed.add_field(name="Version", value=version, inline=True)
+            else:
                 embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
             if game.answer_type == 'title':
@@ -716,6 +840,11 @@ class QuizCog(commands.Cog):
                 embed.add_field(name="Version", value=version, inline=True)
             elif game.answer_type == 'artist':
                 embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
+                embed.add_field(name="Version", value=version, inline=True)
+            elif game.answer_type == 'difficulty':
+                title_display = song.get('romaji') or song.get('title', 'Unknown')
+                embed.add_field(name="Title", value=title_display, inline=False)
+                embed.add_field(name="Artist", value=artist, inline=False)
                 embed.add_field(name="Version", value=version, inline=True)
             
             # Add song image
@@ -850,13 +979,140 @@ class QuizCog(commands.Cog):
             else:
                 embed.description += "\n\nNo scores recorded."
             
-            await channel.send(embed=embed)
+            # Create Play Again button with original config
+            play_again_view = PlayAgainButton(
+                cog=self,
+                channel=channel,
+                host_id=game.host_id,
+                game_config=game.original_config,
+                timeout=60
+            )
+            
+            await channel.send(embed=embed, view=play_again_view)
         except Exception as e:
             print(f"Error in end_game: {e}")
         finally:
             # Always remove game from active games and creating games
             self.active_games.pop(channel.id, None)
             self.creating_games.discard(channel.id)
+    
+    async def start_game_with_config(self, channel: discord.TextChannel, host_id: int, config: dict):
+        """Start a new game with the given config (used by Play Again button)."""
+        if channel.id in self.active_games or channel.id in self.creating_games:
+            await channel.send("❌ A game is already active in this channel!")
+            return
+        
+        self.creating_games.add(channel.id)
+        
+        try:
+            # Load all master difficulty songs
+            all_songs = load_songs(difficulty="master")
+            
+            if not all_songs:
+                await channel.send("❌ No songs found in database!")
+                self.creating_games.discard(channel.id)
+                return
+            
+            # Apply category filter if it was used
+            category_list = None
+            if config.get('categories'):
+                input_cats = [c.strip() for c in config['categories'].split(',')]
+                category_list = []
+                for cat in input_cats:
+                    mapped = CATEGORY_MAPPING.get(cat.lower())
+                    if mapped:
+                        category_list.append(mapped)
+                
+                if category_list:
+                    all_songs = [s for s in all_songs if s.get('category') in category_list]
+            
+            # Apply version filter if it was used
+            version_list = None
+            if config.get('versions'):
+                input_vers = [v.strip() for v in config['versions'].split(',')]
+                version_list = []
+                for ver in input_vers:
+                    mapped = VERSION_MAPPING.get(ver.lower())
+                    if mapped:
+                        version_list.append(mapped)
+                    else:
+                        version_list.append(ver)
+                
+                if version_list:
+                    all_songs = [s for s in all_songs if s.get('version') in version_list]
+            
+            songs = all_songs
+            
+            if not songs:
+                await channel.send("❌ No songs found with the specified filters!")
+                self.creating_games.discard(channel.id)
+                return
+            
+            rounds = config['rounds']
+            if len(songs) < rounds:
+                rounds = len(songs)
+            
+            # Shuffle and select songs
+            random.shuffle(songs)
+            song_pool = songs[:rounds]
+            
+            # Filter by available media files
+            mode = config['mode']
+            if mode == 'image':
+                song_pool = [s for s in song_pool if get_song_image_path(s)]
+            elif mode == 'audio':
+                song_pool = [s for s in song_pool if get_song_audio_path(s)]
+            
+            if not song_pool:
+                await channel.send(f"❌ No songs with {mode} files available!")
+                self.creating_games.discard(channel.id)
+                return
+            
+            if len(song_pool) < rounds:
+                rounds = len(song_pool)
+            
+            # Update config with new song pool
+            new_config = config.copy()
+            new_config['rounds'] = rounds
+            new_config['song_pool'] = song_pool
+            
+            # Create new game session
+            game = GameSession(channel.id, host_id, new_config)
+            self.active_games[channel.id] = game
+            self.creating_games.discard(channel.id)
+            
+            # Send start message
+            difficulty_text = ""
+            if mode == 'image':
+                difficulty_labels = {'easy': 'Easy (full image)', 'medium': 'Medium (25%)', 'hard': 'Hard (10%)'}
+                difficulty_text = f"\n**Image Difficulty:** {difficulty_labels.get(config.get('image_difficulty', 'easy'), config.get('image_difficulty', 'easy'))}"
+            
+            embed = discord.Embed(
+                title="🔁 Quiz Restarting!",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}",
+                color=discord.Color.green()
+            )
+            
+            if category_list:
+                embed.add_field(name="Categories", value=", ".join(category_list), inline=False)
+            if version_list:
+                embed.add_field(name="Versions", value=", ".join(version_list), inline=False)
+            
+            embed.set_footer(text="Get ready! First round starting in 3 seconds...")
+            
+            await channel.send(embed=embed)
+            
+            # Start the first round after delay
+            await asyncio.sleep(3)
+            await self.start_round(channel)
+            
+        except Exception as e:
+            print(f"Error starting game with config: {e}")
+            import traceback
+            traceback.print_exc()
+            await channel.send(f"❌ Error starting game: {str(e)}")
+            self.creating_games.discard(channel.id)
+            self.active_games.pop(channel.id, None)
     
     @app_commands.command(name="filters", description="Show available categories and versions for filtering")
     async def show_filters(self, interaction: discord.Interaction):
@@ -1076,8 +1332,9 @@ class QuizCog(commands.Cog):
     
     @commands.command(name="quiz")
     async def prefix_quiz(self, ctx, mode: str = "audio", answer_type: str = "title", 
-                          rounds: int = 10, time_limit: int = 20, snippet_length: int = 10):
-        """Start a quiz game with prefix command. Usage: q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length]"""
+                          rounds: int = 10, time_limit: int = 20, snippet_length: int = 10,
+                          image_difficulty: str = "easy"):
+        """Start a quiz game with prefix command. Usage: q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty]"""
         # Create a fake interaction-like object for compatibility
         channel_id = ctx.channel.id
         
@@ -1102,6 +1359,9 @@ class QuizCog(commands.Cog):
         rounds = max(1, min(50, rounds))
         time_limit = max(10, min(300, time_limit))
         snippet_length = max(5, min(30, snippet_length))
+        
+        if image_difficulty not in ['easy', 'medium', 'hard']:
+            image_difficulty = 'easy'
         
         try:
             # Load songs
@@ -1139,16 +1399,24 @@ class QuizCog(commands.Cog):
                 'time_limit': time_limit,
                 'rounds': rounds,
                 'snippet_length': snippet_length,
-                'song_pool': song_pool
+                'image_difficulty': image_difficulty,
+                'song_pool': song_pool,
+                'categories': None,  # Prefix command doesn't support filters
+                'versions': None
             }
             
             game = GameSession(channel_id, ctx.author.id, config)
             self.active_games[channel_id] = game
             self.creating_games.discard(channel_id)
             
+            difficulty_text = ""
+            if mode == 'image':
+                difficulty_labels = {'easy': 'Easy (full image)', 'medium': 'Medium (25%)', 'hard': 'Hard (10%)'}
+                difficulty_text = f"\n**Image Difficulty:** {difficulty_labels.get(image_difficulty, image_difficulty)}"
+            
             embed = discord.Embed(
                 title="🎵 MaiMai Song Quiz Started!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}",
                 color=discord.Color.blue()
             )
             embed.set_footer(text="Get ready! First round starting in 3 seconds...")

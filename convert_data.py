@@ -201,7 +201,9 @@ def get_romaji_override(title):
         'ねぇ、壊れタ人形ハ何処へ棄テらレるノ？': 'Nee, Kowareta Ningyou wa Doko e Suterareru no?',
         '殿ッ！？ご乱心！？': 'Tono! ? Goranshin! ?',
         'プリズム△▽リズム': 'Prism Rhythm',
-        'ばかみたい【Taxi Driver Edition】': 'Baka Mitai'
+        'ばかみたい【Taxi Driver Edition】': 'Baka Mitai',
+        'ヴィラン': 'Villain',
+        'False Amber (from the Black Bazaar, Or by A Kervan Trader from the Lands Afar, Or Buried Beneath the Shifting Sands That Lead Everywhere but Nowhere)': 'False Amber'
     }
     return romaji_overrides.get(title, None)
 
