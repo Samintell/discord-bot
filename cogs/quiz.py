@@ -510,6 +510,9 @@ class QuizCog(commands.Cog):
         from pathlib import Path
         import shutil
         
+        # Get the project root directory (parent of cogs/)
+        project_root = Path(__file__).parent.parent
+        
         try:
             # Check if ffmpeg and ffprobe are available
             if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
@@ -541,7 +544,8 @@ class QuizCog(commands.Cog):
             start_time = random.uniform(0, max_start)
             
             # Create snippet with ffmpeg in OGG Opus format for voice message
-            snippet_dir = Path('audio/snippets')
+            # Use absolute path based on project root
+            snippet_dir = project_root / 'audio' / 'snippets'
             snippet_dir.mkdir(parents=True, exist_ok=True)
             
             snippet_path = snippet_dir / f"snippet_{channel_id}_{int(datetime.now().timestamp())}.ogg"
