@@ -525,8 +525,9 @@ class QuizCog(commands.Cog):
                 str(audio_path)
             ]
             
-            result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=5, shell=True)
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=5)
             if result.returncode != 0:
+                print(f"ffprobe failed: {result.stderr}")
                 return None
             
             duration = float(result.stdout.strip())
@@ -559,7 +560,10 @@ class QuizCog(commands.Cog):
                 str(snippet_path)
             ]
             
-            subprocess.run(ffmpeg_cmd, capture_output=True, timeout=10, shell=True)
+            ffmpeg_result = subprocess.run(ffmpeg_cmd, capture_output=True, timeout=10)
+            
+            if ffmpeg_result.returncode != 0:
+                print(f"ffmpeg failed: {ffmpeg_result.stderr.decode()}")
             
             if snippet_path.exists():
                 return str(snippet_path)
