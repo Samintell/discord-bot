@@ -513,17 +513,9 @@ class QuizCog(commands.Cog):
         # Get the project root directory (parent of cogs/)
         project_root = Path(__file__).parent.parent
         
-        print(f"[SNIPPET] Creating snippet from: {audio_path}")
-        print(f"[SNIPPET] Project root: {project_root}")
-        
         try:
             # Check if ffmpeg and ffprobe are available
-            ffmpeg_path = shutil.which('ffmpeg')
-            ffprobe_path = shutil.which('ffprobe')
-            print(f"[SNIPPET] ffmpeg: {ffmpeg_path}, ffprobe: {ffprobe_path}")
-            
-            if not ffmpeg_path or not ffprobe_path:
-                print("[SNIPPET] ffmpeg or ffprobe not found in PATH")
+            if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
                 return None
             
             # Get audio duration using ffprobe
@@ -535,28 +527,19 @@ class QuizCog(commands.Cog):
                 str(audio_path)
             ]
             
-            print(f"[SNIPPET] Running ffprobe: {' '.join(probe_cmd)}")
             result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
-            print(f"[SNIPPET] ffprobe returncode: {result.returncode}")
-            print(f"[SNIPPET] ffprobe stdout: '{result.stdout.strip()}'")
-            print(f"[SNIPPET] ffprobe stderr: '{result.stderr.strip()}'")
-            
             if result.returncode != 0:
-                print(f"[SNIPPET] ffprobe failed: {result.stderr}")
                 return None
             
             duration = float(result.stdout.strip())
-            print(f"[SNIPPET] Audio duration: {duration}s, snippet length: {snippet_length}s")
             
             # If song is shorter than snippet length, use full song
             if duration <= snippet_length:
-                print(f"[SNIPPET] Audio shorter than snippet, using full audio")
                 return str(audio_path)
             
             # Pick random start time
             max_start = duration - snippet_length
             start_time = random.uniform(0, max_start)
-            print(f"[SNIPPET] Random start time: {start_time}s")
             
             # Create snippet with ffmpeg in OGG Opus format for voice message
             # Use absolute path based on project root
@@ -564,7 +547,6 @@ class QuizCog(commands.Cog):
             snippet_dir.mkdir(parents=True, exist_ok=True)
             
             snippet_path = snippet_dir / f"snippet_{channel_id}_{int(datetime.now().timestamp())}.ogg"
-            print(f"[SNIPPET] Output path: {snippet_path}")
             
             ffmpeg_cmd = [
                 'ffmpeg',
@@ -580,24 +562,13 @@ class QuizCog(commands.Cog):
                 str(snippet_path)
             ]
             
-            print(f"[SNIPPET] Running ffmpeg: {' '.join(ffmpeg_cmd)}")
-            ffmpeg_result = subprocess.run(ffmpeg_cmd, capture_output=True, timeout=30)
-            
-            print(f"[SNIPPET] ffmpeg returncode: {ffmpeg_result.returncode}")
-            if ffmpeg_result.returncode != 0:
-                print(f"[SNIPPET] ffmpeg failed: {ffmpeg_result.stderr.decode()}")
+            subprocess.run(ffmpeg_cmd, capture_output=True, timeout=30)
             
             if snippet_path.exists():
-                print(f"[SNIPPET] Success! Snippet created at {snippet_path}")
                 return str(snippet_path)
-            else:
-                print(f"[SNIPPET] Snippet file does not exist after ffmpeg")
             return None
             
         except Exception as e:
-            print(f"[SNIPPET] Error creating audio snippet: {e}")
-            import traceback
-            traceback.print_exc()
             return None
     
     async def start_round(self, channel: discord.TextChannel):
