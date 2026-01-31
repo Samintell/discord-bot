@@ -548,11 +548,14 @@ class QuizCog(commands.Cog):
             
             snippet_path = snippet_dir / f"snippet_{channel_id}_{int(datetime.now().timestamp())}.ogg"
             
+            # Use loudnorm filter to normalize audio volume for consistent playback
+            # Target: -16 LUFS (standard for streaming), with true peak at -1.5 dB
             ffmpeg_cmd = [
                 'ffmpeg',
                 '-ss', str(start_time),
                 '-i', str(audio_path),
                 '-t', str(snippet_length),
+                '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
                 '-c:a', 'libopus',
                 '-b:a', '64k',
                 '-vbr', 'on',
