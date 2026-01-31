@@ -153,5 +153,5 @@ cython_debug/
 
 audio/
 images/
-
+new_songs/
 *.json

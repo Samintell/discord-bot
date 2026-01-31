@@ -41,7 +41,7 @@ def get_english_translation(title, artist, song_id):
         'シュガーソングとビターステップ': 'Sugar Song and Bitter Step',
         '夜咄ディセイブ': 'Night Talk Deceive',
         'ローリンガール': 'Rolling Girl',
-        'いーあるふぁんくらぶ': 'Ii Aru Fan Club',
+        'いーあるふぁんくらぶ': '1 2 Fan Club',
         '裏表ラバーズ': 'Ura-Omote Lovers',
         '弱虫モンブラン': 'Coward Mont Blanc',
         'モザイクロール': 'Mozaik Role',
@@ -174,7 +174,14 @@ def get_english_translation(title, artist, song_id):
         'バカ通信': 'Idiotic Transaction',
         'み　む　かｩ　わ　ナ　イ　ス　ト　ラ　イ　ク': 'Mimukauwa Nice Try',
         'Don\'t Fight The Music': 'donfai',
-        '神っぽいな': 'God-ish'
+        '神っぽいな': 'God-ish',
+        'Seyana. ～何でも言うことを聞いてくれるアカネチャン～': 'Seyana.',
+        '寝起きヤシの木': 'Waking Yashinoki',
+        'あなたは世界の終わりにずんだを食べるのだ': 'You will eat Zunda at the end of the world',
+        'ライアーダンサー': 'Liar Dancer',
+        '悪戯センセーション': 'Mischievious Sensation',
+        '拝啓、最高の思い出たち': 'Dear my sweet memories',
+        'キミノヨゾラ哨戒班': 'Night Sky Patrol of Tomorrow'
     }
     
     if title in known_translations:
@@ -214,7 +221,26 @@ def get_romaji_override(title):
         'パラマウント☆ショータイム！！': 'Paramount Showtime!!',
         'VeRForTe αRtE:VEiN': 'Verforte Arte Vein',
         '系ぎて': 'Tsunagite',
-        '独りんぼエンヴィー ': 'Hitorinbo Envy'
+        '独りんぼエンヴィー ': 'Hitorinbo Envy',
+        'テリトリーバトル': 'Territory Battle',
+        'キャットラビング': 'Cat Loving',
+        'ミルキースター・シューティングスター': 'Milky Star, Shooting Star',
+        'ヘビーローテーション': 'Heavy Rotation',
+        'ゼロトーキング': 'Zero Talking',
+        '人生リセットボタン': 'Jinsei Reset Button',
+        'ピリオドサイン': 'Period Sign',
+        'スロウダウナー': 'Slow Downer',
+        'リフヴェイン': 'Rifvein',
+        '悪戯センセーション': 'Itazura Sensation',
+        'アイデンティティ': 'Identity',
+        'パラボラ': 'Parabola',
+        'ジレンマ': 'Dilemma',
+        '幾望の月': 'Kibou no Tsuki',
+        '言ノ葉遊戯': 'Kotonoha Yugi',
+        '明星ギャラクティカ': 'Myoujou Galactica',
+        '最愛人生ランナー': 'Saiai Jinsei Runner',
+        '神威': 'Kamui',
+        'KHYMΞXΛ': 'KHYMEXA'
     }
     return romaji_overrides.get(title, None)
 
