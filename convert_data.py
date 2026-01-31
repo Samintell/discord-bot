@@ -172,7 +172,9 @@ def get_english_translation(title, artist, song_id):
         'チルノのパーフェクトさんすう教室　⑨周年バージョン': 'Cirno\'s Perfect Math Class 9th Anniversary Version',
         'スカーレット警察のゲットーパトロール24時': 'Scarlet Police Ghetto Patrol 24 Hours',
         'バカ通信': 'Idiotic Transaction',
-        'み　む　かｩ　わ　ナ　イ　ス　ト　ラ　イ　ク': 'Mimukauwa Nice Try'
+        'み　む　かｩ　わ　ナ　イ　ス　ト　ラ　イ　ク': 'Mimukauwa Nice Try',
+        'Don\'t Fight The Music': 'donfai',
+        '神っぽいな': 'God-ish'
     }
     
     if title in known_translations:
@@ -210,8 +212,9 @@ def get_romaji_override(title):
         'ヴィラン': 'Villain',
         'False Amber (from the Black Bazaar, Or by A Kervan Trader from the Lands Afar, Or Buried Beneath the Shifting Sands That Lead Everywhere but Nowhere)': 'False Amber',
         'パラマウント☆ショータイム！！': 'Paramount Showtime!!',
-        'VeRForTe αRtE:VEiN': 'Verforte Arte Vein'
-        ''
+        'VeRForTe αRtE:VEiN': 'Verforte Arte Vein',
+        '系ぎて': 'Tsunagite',
+        '独りんぼエンヴィー ': 'Hitorinbo Envy'
     }
     return romaji_overrides.get(title, None)
 

@@ -12,6 +12,7 @@ import argparse
 
 # Configuration
 AUDIO_DIR = Path("audio")
+NEW_SONGS_DIR = Path("new_songs")
 OUTPUT_JSON = Path("output.json")
 AUDIO_FORMAT = "mp3"
 AUDIO_QUALITY = "5"  # 0=best, 9=worst
@@ -26,8 +27,21 @@ def parse_args():
                         help='Search for a specific song by title/romaji (use with --replace)')
     return parser.parse_args()
 
-# Create audio directory if it doesn't exist
+# Create directories if they don't exist
 AUDIO_DIR.mkdir(exist_ok=True)
+NEW_SONGS_DIR.mkdir(exist_ok=True)
+
+def copy_to_new_songs(audio_path: Path):
+    """Copy an audio file to the new_songs directory."""
+    import shutil
+    try:
+        dest_path = NEW_SONGS_DIR / audio_path.name
+        shutil.copy2(audio_path, dest_path)
+        print(f"  📋 Copied to new_songs/: {audio_path.name}")
+        return True
+    except Exception as e:
+        print(f"  ⚠️  Failed to copy to new_songs/: {e}")
+        return False
 
 def load_songs():
     """Load and filter songs from output.json (master difficulty only)."""
@@ -276,6 +290,7 @@ def replace_mode(songs, search_query=None):
             
             if audio_path.exists():
                 print(f"  ✅ Successfully saved: {audio_filename}")
+                copy_to_new_songs(audio_path)
             else:
                 # Check for new files (yt-dlp may have sanitized the filename)
                 files_after = {f: f.stat().st_mtime for f in AUDIO_DIR.glob('*.mp3')}
@@ -288,9 +303,11 @@ def replace_mode(songs, search_query=None):
                     try:
                         new_file.rename(audio_path)
                         print(f"  ✅ Successfully saved: {audio_filename}")
+                        copy_to_new_songs(audio_path)
                     except Exception as e:
                         print(f"  ⚠️  Rename failed: {e}")
                         print(f"  ✅ File saved as: {new_file.name}")
+                        copy_to_new_songs(new_file)
                 else:
                     print(f"  ⚠️  Download completed but file not found")
         else:
@@ -426,6 +443,7 @@ def main():
                     # Check if expected file exists
                     if audio_path.exists():
                         print(f"  ✅ Successfully saved: {audio_filename}")
+                        copy_to_new_songs(audio_path)
                         downloaded += 1
                         progress["completed"].append(song_id)
                         save_progress(progress)
@@ -447,6 +465,7 @@ def main():
                             try:
                                 new_file.rename(audio_path)
                                 print(f"  ✅ Successfully saved: {audio_filename}")
+                                copy_to_new_songs(audio_path)
                                 downloaded += 1
                                 progress["completed"].append(song_id)
                                 save_progress(progress)
@@ -454,6 +473,7 @@ def main():
                             except Exception as e:
                                 print(f"  ⚠️  Rename failed: {e}")
                                 print(f"  ✅ File saved as: {new_file.name}")
+                                copy_to_new_songs(new_file)
                                 downloaded += 1
                                 progress["completed"].append(song_id)
                                 save_progress(progress)
@@ -470,6 +490,7 @@ def main():
                                 try:
                                     newest.rename(audio_path)
                                     print(f"  ✅ Successfully saved: {audio_filename}")
+                                    copy_to_new_songs(audio_path)
                                     downloaded += 1
                                     progress["completed"].append(song_id)
                                     save_progress(progress)
@@ -477,6 +498,7 @@ def main():
                                 except Exception as e:
                                     print(f"  ⚠️  Rename failed: {e}")
                                     print(f"  ✅ File saved as: {newest.name}")
+                                    copy_to_new_songs(newest)
                                     downloaded += 1
                                     progress["completed"].append(song_id)
                                     save_progress(progress)
