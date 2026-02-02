@@ -12,7 +12,8 @@ PROJECT_ROOT = Path(__file__).parent.parent
 def load_songs(
     difficulty: str = "master",
     category: Optional[str] = None,
-    version: Optional[str] = None
+    version: Optional[str] = None,
+    region: Optional[str] = None
 ) -> List[Dict]:
     """
     Load songs from output.json with filtering.
@@ -21,6 +22,7 @@ def load_songs(
         difficulty: Filter by difficulty (default: "master")
         category: Optional category filter (e.g., "POPS＆アニメ")
         version: Optional version filter (e.g., "FESTiVAL")
+        region: Optional region filter (e.g., "jp", "intl", "usa")
     
     Returns:
         List of unique songs (deduplicated by song_id)
@@ -44,6 +46,11 @@ def load_songs(
             continue
         if version and song.get('version') != version:
             continue
+        # Apply region filter if specified
+        if region:
+            song_regions = song.get('regions', [])
+            if region not in song_regions:
+                continue
         
         # Deduplicate by song_id, keeping the higher difficulty level
         song_id = song['song_id']

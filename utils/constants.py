@@ -55,3 +55,16 @@ VERSION_MAPPING = {v.lower(): k for k, v in VERSIONS.items()}
 # Also add Japanese names in the mapping (lowercase -> original)
 for jp_name in VERSIONS.keys():
     VERSION_MAPPING[jp_name.lower()] = jp_name
+
+# Available regions (display name: internal key)
+REGIONS = {
+    "Japan": "jp",
+    "International": "intl",
+    "USA": "usa"
+}
+
+# Create reverse mapping for lookups (lowercase -> internal key)
+REGION_MAPPING = {v.lower(): v for v in REGIONS.values()}
+# Also add display names in the mapping (lowercase -> internal key)
+for display_name, key in REGIONS.items():
+    REGION_MAPPING[display_name.lower()] = key

@@ -2,15 +2,16 @@
 
 ## Project Overview
 
-Discord bot for playing "Guess the Song" using MaiMai rhythm game charts. Users are shown song cover images and guess the title, artist, or other attributes.
+Discord bot for playing "Guess the Song" using MaiMai rhythm game charts. Users are shown song cover images or hear audio snippets and guess the title, artist, or difficulty level.
 
 ## Architecture & Data Flow
 
 ### Core Components
-- **Game Engine**: Manages quiz sessions, scoring, and round progression
+- **Game Engine** (`cogs/quiz.py`): Manages quiz sessions, scoring, and round progression using `GameSession` class
 - **Song Database**: `output.json` contains 21,494+ song entries with metadata
 - **Image Assets**: `images/` folder with 1,700+ PNG cover art files
-- **Discord Interface**: Commands for starting games, submitting guesses, viewing scores
+- **Audio Assets**: `audio/` folder with MP3 files (same base name as images)
+- **Discord Interface**: Slash commands (`/quiz`, `/skip`, `/stop`, etc.) and prefix commands (`q>quiz`, `q>skip`, etc.)
 
 ### Song Data Structure
 Each song entry in `output.json`:
@@ -19,141 +20,252 @@ Each song entry in `output.json`:
   "song_id": "unique_identifier",      // Primary key, same for multiple difficulties
   "title": "日本語タイトル",             // Japanese title (Unicode)
   "romaji": "Romanized title",         // Latin alphabet version for guessing
+  "english": "English translation",    // Optional English title
   "artist": "Artist name",
   "category": "POPS＆アニメ",           // Genre categories
   "version": "maimai version",         // Game version it appeared in
   "type": "dx" | "std",                // Chart type
   "difficulty": "master",              // Chart difficulty level
   "level": 12.5,                       // Numeric difficulty rating
-  "image": "filename.png"              // Corresponds to images/ folder
+  "image": "filename.png",             // Corresponds to images/ folder
+  "regions": ["jp", "intl", "usa"]     // Available regions array
 }
 ```
 
 **Key Data Patterns:**
 - Multiple difficulty entries share the same `song_id` and `image`
-- Categories include: `POPS＆アニメ`, `niconico＆ボーカロイド`, `東方Project`, `ゲーム＆バラエティ`, `maimai`, etc.
+- Categories: `POPS＆アニメ`, `niconico＆ボーカロイド`, `東方Project`, `ゲーム＆バラエティ`, `maimai`, `オンゲキ＆CHUNITHM`
 - Image filenames may contain Unicode characters - handle with path encoding
-- `romaji` field is primary for English matching; `title` is original Japanese
+- Audio files use same base name as images with `.mp3` extension
+- Accepts `master` and `remaster` difficulties for filtering
 
 ## Game Logic Design
 
 ### Game Modes & Configuration
-- **Guess Type**: Image (show cover art) OR Audio (play song clip)
-- **Answer Type**: Title OR Artist (configurable per session)
-- **Time Limit**: Adjustable per session (e.g., 30s, 60s, 90s)
+- **Mode**: `image` (show cover art) OR `audio` (play song snippet as voice message)
+- **Answer Type**: `title`, `artist`, OR `difficulty` (configurable per session)
+- **Time Limit**: 10-300 seconds per round (default: 20s)
+- **Rounds**: 1-50 rounds per game (default: 10)
+- **Audio Snippet Length**: 5-30 seconds (default: 10s)
+- **Image Difficulty**: `easy` (full image), `medium` (25% crop), `hard` (10% crop)
+- **Filtering**: By category, version, and/or region (comma-separated lists)
+- **Region**: `any` (all songs), `jp` (Japan), `intl` (International), `usa` (USA)
 - **Multiplayer**: Multiple users compete simultaneously - first correct answer wins the point
 
-### Typical Quiz Flow
-1. Load song pool from `output.json` filtering:
-   - **Only `difficulty: "master"`** entries (ignore other difficulties)
-   - Optional: filter by `category` (e.g., `POPS＆アニメ`, `東方Project`)
-   - Optional: filter by `version` (e.g., `FESTiVAL`, `BUDDiES`)
-2. Deduplicate by `song_id` (since master-only filtering reduces duplicates)
-3. Send cover image from `images/` OR audio clip as Discord embed
-4. Start countdown timer (adjustable: 30-120 seconds)
-5. Accept guesses from all participants until:
-   - Someone answers correctly (first correct wins)
-   - Timer expires (reveal answer, no points awarded)
-6. Display: winner username, response time in seconds, correct answer
-7. Update scores and proceed to next round
+### Quiz Flow Implementation
+1. `/quiz` command triggers `quiz_start()` in `QuizCog`
+2. Load song pool from `output.json` via `song_loader.load_songs()`:
+   - Filter by `difficulty: "master"` or `"remaster"`
+   - Optional: filter by `category`, `version`, and/or `region`
+   - Deduplicate by `song_id` (keeping highest level)
+3. Create `GameSession` object with config and song pool
+4. For each round (`start_round()`):
+   - Pop next song from pool
+   - Send embed with Skip button (`SkipButton` view)
+   - For image mode: crop image based on difficulty setting
+   - For audio mode: create OGG Opus snippet via ffmpeg, send as Discord voice message
+5. Listen for guesses via `on_message()` listener
+6. Use `check_answer()` from `utils/matcher.py` for fuzzy matching
+7. First correct answer wins point; display response time and answer
+8. Timeout handled by `asyncio.Task` (`round_timeout()`)
+9. End game shows leaderboard and "Play Again" button (`PlayAgainButton` view)
 
-### Answer Matching Strategy
-**Critical: Accept BOTH Japanese (`title`) and romaji (`romaji`) answers**
-- **Partial matching required**: Use substring/fuzzy matching (e.g., `difflib.SequenceMatcher` with threshold ~0.8)
-- Normalize all inputs: lowercase, strip punctuation, remove extra whitespace
-- For artist mode: match against `artist` field with same partial logic
-- Example matches:
-  - Input: "kimi no shiranai" → Matches: "Kimi no shiranai monogatari"
-  - Input: "君の知らない" → Matches: "君の知らない物語"
-  - Input: "supercell" → Matches: "supercell「化物語」" (artist mode)
+### Answer Matching Strategy (`utils/matcher.py`)
+**Accepts Japanese (`title`), romaji (`romaji`), AND English (`english`) answers**
+- **Fuzzy matching**: Uses `difflib.SequenceMatcher` with dynamic thresholds
+- **Length-based minimums**: Requires 25-40% of target length depending on title length
+- **Substring matching**: Direct substring matches are accepted
+- **Start matching**: For long titles, typing the beginning is accepted
+- **Normalization**: lowercase, strip punctuation, remove extra whitespace
+- **Difficulty matching**: Exact numeric match required (e.g., "13.7")
 
-## Discord Bot Patterns
+**Threshold adjustments by target length:**
+- < 10 chars: require 40% of length, threshold 0.8
+- 10-20 chars: require 35%, threshold 0.75
+- 20-40 chars: require 30%, threshold 0.7
+- 40+ chars: require 25%, threshold 0.65
 
-### Essential Libraries
-- `discord.py` (or `py-cord`/`disnake`) for Discord API
-- `Pillow` for image processing if creating composite images
-- `asyncio` for concurrent game sessions per channel/server
+## Discord Bot Implementation
+
+### Dependencies (`requirements.txt`)
+```
+discord.py>=2.0.0
+python-dotenv>=0.19.0
+Pillow>=9.0.0
+yt-dlp>=2023.0.0
+requests>=2.28.0
+```
+
+**External requirement**: `ffmpeg` and `ffprobe` must be installed for audio snippet creation
 
 ### Command Structure
-Typical commands to implement:
-- `/quiz start [mode] [answer_type] [rounds] [time_limit] [category] [version]`
-  - `mode`: `image` or `audio`
-  - `answer_type`: `title` or `artist`
-  - `rounds`: number of songs (default: 10)
-  - `time_limit`: seconds per round (default: 60)
-  - `category`: filter songs (optional, e.g., `POPS＆アニメ`)
-  - `version`: filter by game version (optional, e.g., `FESTiVAL`)
-- `/guess <answer>` - Submit guess (no command needed, listen to all messages in channel)
-- `/skip` - Vote to skip current song (majority vote or host-only)
-- `/leaderboard` - Show current session scores
-- `/quiz stop` - End active session (host-only or majority vote)
 
-### State Management
-- Track active games per Discord channel (dict keyed by `channel.id`)
-- Store per session:
-  - Current song data (for answer validation)
-  - Game config: mode (image/audio), answer_type (title/artist), time_limit
-  - Remaining song pool (filtered master difficulty only)
-  - Player scores (dict: `user_id` → points)
-  - Round number, total rounds
-  - Round start timestamp (for calculating response time)
-  - Timeout task (asyncio.Task for timer)
-- Clean up state when game ends or bot restarts
+#### Slash Commands (Primary)
+- `/quiz` - Start quiz with full options:
+  - `mode`: Image or Audio
+  - `answer_type`: Title, Artist, or Difficulty Level
+  - `rounds`: 1-50 (default: 10)
+  - `time_limit`: 10-300 seconds (default: 20)
+  - `snippet_length`: 5-30 seconds (default: 10, audio mode only)
+  - `image_difficulty`: Easy/Medium/Hard (image mode only)
+  - `categories`: Comma-separated filter (e.g., "pops,touhou")
+  - `versions`: Comma-separated filter (e.g., "festival,buddies")
+  - `region`: Any, Japan, International, or USA
+- `/skip` - Skip current round (host only)
+- `/stop` - End game (host only)
+- `/leaderboard` - Show current scores
+- `/filters` - Show available categories, versions, and regions
+- `/help` - Show help information
+- `/report_translation` - Report incorrect English translation
+- `/report_audio` - Report audio issues
 
-### Scoring System
-- **1 point** for first correct answer per round
-- **Only first person** to answer correctly gets the point
-- Display response time: `{username} got it in {seconds:.2f}s!`
-- No points awarded if timer expires before correct answer
+#### Prefix Commands (`q>`)
+- `q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty]`
+- `q>skip` - Skip current round
+- `q>stop` - Stop game
+- `q>lb` or `q>leaderboard` - Show scores
+- `q>qhelp` - Show help
+
+### State Management (`GameSession` class)
+```python
+class GameSession:
+    channel_id: int
+    host_id: int
+    mode: str  # 'image' or 'audio'
+    answer_type: str  # 'title', 'artist', or 'difficulty'
+    time_limit: int
+    total_rounds: int
+    snippet_length: int
+    image_difficulty: str  # 'easy', 'medium', 'hard'
+    current_round: int
+    song_pool: List[dict]
+    current_song: Optional[dict]
+    scores: Dict[int, int]  # user_id -> score
+    round_start_time: Optional[datetime]
+    timeout_task: Optional[asyncio.Task]
+    answered: bool
+    original_config: dict  # For replay functionality
+```
+
+- Active games tracked in `QuizCog.active_games: Dict[channel_id, GameSession]`
+- Game creation tracked in `QuizCog.creating_games: set` to prevent duplicates
+- Each channel can have one active game; multiple channels can run simultaneously
+
+### UI Components
+- **SkipButton**: `discord.ui.View` with skip button, host-only access
+- **PlayAgainButton**: Appears after game ends, restarts with same config
+
+### Audio Handling
+- Audio snippets created via `create_audio_snippet()` using ffmpeg
+- Converts to OGG Opus format with loudnorm filter for consistent volume
+- Sent as Discord voice messages using low-level API (`send_voice_message()`)
+- Temporary snippets stored in `audio/snippets/` and cleaned up after sending
+
+### Image Handling
+- `crop_image_for_difficulty()` uses Pillow to crop images:
+  - `easy`: Full image
+  - `medium`: Random 50% x 50% crop (25% of area)
+  - `hard`: Random ~31.6% x ~31.6% crop (10% of area)
 
 ## File Organization
 
-When implementing the bot:
 ```
 discord-bot/
-├── bot.py                 # Main entry point, Discord client setup
+├── bot.py                 # Main entry, Discord client setup, command prefix q>
 ├── cogs/
-│   └── quiz.py           # Quiz commands and game logic
+│   └── quiz.py           # QuizCog with all game logic and commands
 ├── utils/
-│   ├── song_loader.py    # Load/parse output.json
-│   └── matcher.py        # Answer matching logic
-├── config.py             # Bot token, settings
-├── .env                  # Environment variables (DISCORD_TOKEN)
-├── requirements.txt      # Dependencies
-├── output.json           # Song database (existing)
-└── images/               # Cover art (existing)
+│   ├── constants.py      # CATEGORIES, VERSIONS, and mapping dicts
+│   ├── matcher.py        # check_answer(), fuzzy_match(), normalize_string()
+│   └── song_loader.py    # load_songs(), get_song_image_path(), get_song_audio_path()
+├── .env                  # DISCORD_TOKEN=your_token_here
+├── .env.example          # Template for .env
+├── requirements.txt      # Python dependencies
+├── output.json           # Song database
+├── images/               # Cover art PNG files
+├── audio/                # Full audio MP3 files
+│   └── snippets/         # Temporary audio snippets (auto-cleaned)
+├── new_songs/            # New songs to be added
+├── convert_data.py       # Data conversion utility
+├── download_audio.py     # Audio download script using yt-dlp
+├── manual_audio_download.py  # Manual audio download helper
+├── replace_audio.py      # Audio replacement utility
+├── yt-dlp.conf           # yt-dlp configuration
+├── data.json             # Additional data file
+└── translation_submissions.json  # User-submitted translation corrections (auto-generated)
 ```
+
+## Constants (`utils/constants.py`)
+
+### Categories
+```python
+CATEGORIES = {
+    "POPS＆アニメ": "pops",
+    "niconico＆ボーカロイド": "vocaloid", 
+    "東方Project": "touhou",
+    "ゲーム＆バラエティ": "game",
+    "maimai": "maimai",
+    "オンゲキ＆CHUNITHM": "ongeki"
+}
+```
+
+### Versions (subset)
+```python
+VERSIONS = {
+    "FESTiVAL": "festival",
+    "FESTiVAL PLUS": "festival plus",
+    "BUDDiES": "buddies",
+    "BUDDiES PLUS": "buddies plus",
+    "PRiSM": "prism",
+    "PRiSM PLUS": "prism plus",
+    "CiRCLE": "circle",
+    # ... and many more
+}
+```
+
+### Regions
+```python
+REGIONS = {
+    "Japan": "jp",
+    "International": "intl",
+    "USA": "usa"
+}
+```
+
+Both English (lowercase) and Japanese names are accepted for filtering via `CATEGORY_MAPPING`, `VERSION_MAPPING`, and `REGION_MAPPING`.
 
 ## Development Workflow
 
 ### Setup
-1. Install Python 3.8+ and dependencies: `pip install discord.py python-dotenv`
-2. Create Discord bot at https://discord.com/developers/applications
-3. Store token in `.env`: `DISCORD_TOKEN=your_token_here`
-4. Test data loading: verify `output.json` parses correctly with UTF-8 encoding
+1. Install Python 3.8+ and dependencies: `pip install -r requirements.txt`
+2. Install ffmpeg (required for audio mode)
+3. Create Discord bot at https://discord.com/developers/applications
+4. Copy `.env.example` to `.env` and add your token: `DISCORD_TOKEN=your_token_here`
+5. Enable Message Content Intent in Discord Developer Portal
 
-### Running Locally
+### Running
 ```powershell
 python bot.py
 ```
 
-### Testing Without Discord
-- Create unit tests for song loading, duplicate filtering, answer matching
-- Mock Discord objects for command testing
+### Syncing Commands
+- Commands sync automatically on startup
+- Use `q>sync` (bot owner only) to force sync to current server
 
 ## Common Pitfalls
 
-1. **Unicode Handling**: Always open `output.json` with `encoding='utf-8'`
-2. **Path Resolution**: Use `pathlib.Path` or `os.path.join` for cross-platform image paths
-3. **Image File Mismatches**: Some `image` values may not have corresponding files - handle missing files gracefully
-4. **Master Difficulty Only**: Filter `difficulty == "master"` early to avoid duplicates
-5. **Concurrent Games**: Multiple channels can run games simultaneously - ensure proper state isolation
-6. **Race Conditions**: Lock round state when processing guesses (first correct answer only)
-7. **Partial Matching**: Balance fuzzy threshold - too low = false positives, too high = frustration
-8. **Timer Cleanup**: Cancel `asyncio.Task` timers properly when round ends early
-9. **Discord Rate Limits**: Don't send images too rapidly; use embeds efficiently
-10. **Audio Files**: If implementing audio mode, ensure audio files exist (may need separate download/generation)
+1. **Unicode Handling**: Always open files with `encoding='utf-8'`
+2. **Path Resolution**: Use `pathlib.Path` for cross-platform paths (see `PROJECT_ROOT` in song_loader.py)
+3. **Missing Media Files**: `get_song_image_path()` and `get_song_audio_path()` return `None` if file missing
+4. **Master/Remaster Filter**: Both difficulties accepted, deduplication keeps highest level
+5. **Concurrent Games**: One game per channel; `creating_games` set prevents race conditions
+6. **Race Conditions**: `game.answered` flag ensures only first correct answer scores
+7. **Fuzzy Matching**: Dynamic thresholds based on target length balance accuracy vs usability
+8. **Timer Cleanup**: `asyncio.Task.cancel()` called when round ends early
+9. **Audio Mode Requirements**: ffmpeg/ffprobe must be in PATH for snippet creation
+10. **Voice Message API**: Uses low-level Discord API with IS_VOICE_MESSAGE flag (8192)
+11. **Interaction Timeouts**: Respond to interactions immediately, then perform async work
 
 ## Bot Token Security
 - **Never commit** `.env` or hardcoded tokens to git
-- Add to `.gitignore`: `.env`, `*.pyc`, `__pycache__/`, `.vscode/`
+- `.gitignore` includes: `.env`, `*.pyc`, `__pycache__/`, `.vscode/`, `audio/snippets/`

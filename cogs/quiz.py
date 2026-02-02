@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path
 from utils.matcher import check_answer
-from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING
+from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING, REGIONS, REGION_MAPPING
 
 
 class SkipButton(ui.View):
@@ -129,7 +129,8 @@ class GameSession:
             'snippet_length': self.snippet_length,
             'image_difficulty': self.image_difficulty,
             'categories': config.get('categories'),
-            'versions': config.get('versions')
+            'versions': config.get('versions'),
+            'region': config.get('region', 'any')
         }
         
         self.current_round = 0
@@ -304,7 +305,8 @@ class QuizCog(commands.Cog):
         snippet_length="Audio snippet length in seconds (5-30, only for audio mode)",
         image_difficulty="Image visibility (easy=full, medium=25%, hard=10%)",
         categories="Comma-separated (e.g. 'POPS＆アニメ,東方Project') or leave empty for all",
-        versions="Comma-separated (e.g. 'FESTiVAL,BUDDiES,PRiSM') or leave empty for all"
+        versions="Comma-separated (e.g. 'FESTiVAL,BUDDiES,PRiSM') or leave empty for all",
+        region="Filter by game region availability"
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Image", value="image"),
@@ -320,6 +322,12 @@ class QuizCog(commands.Cog):
         app_commands.Choice(name="Medium (25% of image)", value="medium"),
         app_commands.Choice(name="Hard (10% of image)", value="hard")
     ])
+    @app_commands.choices(region=[
+        app_commands.Choice(name="Any", value="any"),
+        app_commands.Choice(name="Japan", value="jp"),
+        app_commands.Choice(name="International", value="intl"),
+        app_commands.Choice(name="USA", value="usa")
+    ])
     async def quiz_start(
         self,
         interaction: discord.Interaction,
@@ -330,7 +338,8 @@ class QuizCog(commands.Cog):
         snippet_length: int = 10,
         image_difficulty: str = "easy",
         categories: Optional[str] = None,
-        versions: Optional[str] = None
+        versions: Optional[str] = None,
+        region: str = "usa"
     ):
         """Start a new quiz game."""
         channel_id = interaction.channel_id
@@ -416,6 +425,9 @@ class QuizCog(commands.Cog):
                     # If not found, use original (for partial matches)
                     version_list.append(ver)
         
+        # Handle region filter (None if "any" is selected)
+        region_filter = None if region == "any" else region
+        
         try:
             # Load all master difficulty songs
             all_songs = load_songs(difficulty="master")
@@ -427,6 +439,10 @@ class QuizCog(commands.Cog):
             # Filter by versions if specified
             if version_list:
                 all_songs = [s for s in all_songs if s.get('version') in version_list]
+            
+            # Filter by region if specified
+            if region_filter:
+                all_songs = [s for s in all_songs if region_filter in s.get('regions', [])]
             
             songs = all_songs
             
@@ -466,7 +482,8 @@ class QuizCog(commands.Cog):
                 'image_difficulty': image_difficulty,
                 'song_pool': song_pool,
                 'categories': categories,  # Store original input for replay
-                'versions': versions  # Store original input for replay
+                'versions': versions,  # Store original input for replay
+                'region': region  # Store region for replay
             }
             
             game = GameSession(channel_id, interaction.user.id, config)
@@ -479,9 +496,14 @@ class QuizCog(commands.Cog):
                 difficulty_labels = {'easy': 'Easy (full image)', 'medium': 'Medium (25%)', 'hard': 'Hard (10%)'}
                 difficulty_text = f"\n**Image Difficulty:** {difficulty_labels.get(image_difficulty, image_difficulty)}"
             
+            region_text = ""
+            if region_filter:
+                region_labels = {'jp': 'Japan', 'intl': 'International', 'usa': 'USA'}
+                region_text = f"\n**Region:** {region_labels.get(region_filter, region_filter)}"
+            
             embed = discord.Embed(
                 title="🎵 MaiMai Song Quiz Started!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}{region_text}",
                 color=discord.Color.blue()
             )
             
@@ -1046,6 +1068,12 @@ class QuizCog(commands.Cog):
                 if version_list:
                     all_songs = [s for s in all_songs if s.get('version') in version_list]
             
+            # Apply region filter if it was used
+            region = config.get('region', 'any')
+            region_filter = None if region == 'any' else region
+            if region_filter:
+                all_songs = [s for s in all_songs if region_filter in s.get('regions', [])]
+            
             songs = all_songs
             
             if not songs:
@@ -1092,9 +1120,14 @@ class QuizCog(commands.Cog):
                 difficulty_labels = {'easy': 'Easy (full image)', 'medium': 'Medium (25%)', 'hard': 'Hard (10%)'}
                 difficulty_text = f"\n**Image Difficulty:** {difficulty_labels.get(config.get('image_difficulty', 'easy'), config.get('image_difficulty', 'easy'))}"
             
+            region_text = ""
+            if region_filter:
+                region_labels = {'jp': 'Japan', 'intl': 'International', 'usa': 'USA'}
+                region_text = f"\n**Region:** {region_labels.get(region_filter, region_filter)}"
+            
             embed = discord.Embed(
                 title="🔁 Quiz Restarting!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}{region_text}",
                 color=discord.Color.green()
             )
             
@@ -1140,7 +1173,11 @@ class QuizCog(commands.Cog):
         embed.add_field(name="Versions (1/2)", value=versions_col1, inline=True)
         embed.add_field(name="Versions (2/2)", value=versions_col2, inline=True)
         
-        embed.set_footer(text="Example: /quiz categories:pops,touhou versions:festival,buddies")
+        # Add regions
+        regions_text = "\n".join([f"• **{display}** ({key})" for display, key in REGIONS.items()])
+        embed.add_field(name="Regions", value=regions_text, inline=False)
+        
+        embed.set_footer(text="Example: /quiz categories:pops,touhou versions:festival,buddies region:intl")
         
         try:
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1167,8 +1204,9 @@ class QuizCog(commands.Cog):
                 "• **time_limit**: Seconds per round (15-180, default: 60)\n"
                 "• **categories**: Filter by genre (comma-separated)\n"
                 "• **versions**: Filter by game version (comma-separated)\n"
+                "• **region**: Filter by region (`Any`, `Japan`, `International`, `USA`)\n"
                 "• **snippet_length**: Audio length in seconds (5-30, default: 10)\n\n"
-                "**Example**: `/quiz mode:Image answer_type:Title rounds:5`"
+                "**Example**: `/quiz mode:Image answer_type:Title rounds:5 region:intl`"
             ),
             inline=False
         )

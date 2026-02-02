@@ -181,7 +181,9 @@ def get_english_translation(title, artist, song_id):
         'ライアーダンサー': 'Liar Dancer',
         '悪戯センセーション': 'Mischievious Sensation',
         '拝啓、最高の思い出たち': 'Dear my sweet memories',
-        'キミノヨゾラ哨戒班': 'Night Sky Patrol of Tomorrow'
+        'キミノヨゾラ哨戒班': 'Night Sky Patrol of Tomorrow',
+        '星界ちゃんと可不ちゃんのおつかい合騒曲':'Sekai-Chan and Kafu-Chan\'s Otsukai Gassoukyoku',
+        '患部で止まってすぐ溶ける～狂気の優曇華院': 'Stop at the affected part and melt quickly ~ Madness Udine Quarter '
     }
     
     if title in known_translations:
@@ -240,7 +242,14 @@ def get_romaji_override(title):
         '明星ギャラクティカ': 'Myoujou Galactica',
         '最愛人生ランナー': 'Saiai Jinsei Runner',
         '神威': 'Kamui',
-        'KHYMΞXΛ': 'KHYMEXA'
+        'KHYMΞXΛ': 'KHYMEXA',
+        '人生リセットボタン': 'Jinsei Reset Button',
+        'ダンスロボットダンス': 'Dance Robot Dance',
+        'ずんだパーリナイ': 'Zunda Party Night',
+        '唱': 'show',
+        '僕の和風本当上手': 'Boku no Wafuu Hontou Jouzu',
+        '花と、雪と、ドラムンベース。': 'Hana to, Yuki to, Drum n Bass.',
+        '廻廻奇譚': 'Kaikai Kitan'
     }
     return romaji_overrides.get(title, None)
 
@@ -314,6 +323,17 @@ def main():
                         })
                     romaji = song['title']
                 
+                # Extract regions where the chart is available
+                regions = []
+                if 'regions' in chart:
+                    region_data = chart['regions']
+                    if region_data.get('jp', False):
+                        regions.append('jp')
+                    if region_data.get('intl', False):
+                        regions.append('intl')
+                    if region_data.get('usa', False):
+                        regions.append('usa')
+                
                 chart_entry = {
                     'song_id': song['songId'],
                     'category': song['category'],
@@ -325,7 +345,8 @@ def main():
                     'level': chart['internalLevelValue'],
                     'image': image,
                     'romaji': romaji,
-                    'english': english_title
+                    'english': english_title,
+                    'regions': regions
                 }
                 chart_data.append(chart_entry)
 
