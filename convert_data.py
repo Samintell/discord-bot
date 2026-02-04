@@ -256,6 +256,9 @@ def get_romaji_override(title):
         'ジングルベル': 'Jingle Bells',
         'お呪い': 'Omojinai',
         'のじゃロリック': 'noja-lolic',
+        'エテルニタス・ルドロジー': 'Eternitas Ludology',
+        'アンノウン・マザーグース': 'Unknown Mother Goose',
+        'エンジェル ドリーム': 'Angel Dream',
     }
     return romaji_overrides.get(title, None)
 
