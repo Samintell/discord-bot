@@ -183,7 +183,10 @@ def get_english_translation(title, artist, song_id):
         '拝啓、最高の思い出たち': 'Dear my sweet memories',
         'キミノヨゾラ哨戒班': 'Night Sky Patrol of Tomorrow',
         '星界ちゃんと可不ちゃんのおつかい合騒曲':'Sekai-Chan and Kafu-Chan\'s Otsukai Gassoukyoku',
-        '患部で止まってすぐ溶ける～狂気の優曇華院': 'Stop at the affected part and melt quickly ~ Madness Udine Quarter '
+        '患部で止まってすぐ溶ける～狂気の優曇華院': 'Stop at the affected part and melt quickly ~ Madness Udine Quarter ',
+        '匿名M': 'Anonymous M',
+        'ロミオとシンデレラ': 'Romeo and Cinderella',
+        'デビルじゃないもん': '(Not) a Devil',
     }
     
     if title in known_translations:
@@ -249,7 +252,10 @@ def get_romaji_override(title):
         '唱': 'show',
         '僕の和風本当上手': 'Boku no Wafuu Hontou Jouzu',
         '花と、雪と、ドラムンベース。': 'Hana to, Yuki to, Drum n Bass.',
-        '廻廻奇譚': 'Kaikai Kitan'
+        '廻廻奇譚': 'Kaikai Kitan',
+        'ジングルベル': 'Jingle Bells',
+        'お呪い': 'Omojinai',
+        'のじゃロリック': 'noja-lolic',
     }
     return romaji_overrides.get(title, None)
 
