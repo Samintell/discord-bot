@@ -995,9 +995,13 @@ class QuizCog(commands.Cog):
                     if not display_name:
                         try:
                             user = await self.bot.fetch_user(user_id)
-                            display_name = user.display_name
-                        except:
-                            display_name = f"User {user_id}"
+                            if user:
+                                display_name = user.display_name
+                        except Exception as e:
+                            print(f"Failed to fetch user {user_id}: {e}")
+                    # Final fallback: use mention format
+                    if not display_name:
+                        display_name = f"<@{user_id}>"
                     medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
                     embed.add_field(name=f"{medal} {display_name}", value=f"{score} point(s)", inline=False)
                 
