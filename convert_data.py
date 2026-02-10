@@ -68,7 +68,6 @@ def get_english_translation(title, artist, song_id):
         'エイリアンエイリアン': 'Alien Alien',
         'テレキャスタービーボーイ': 'Telecaster B-Boy',
         'アンハッピーリフレイン': 'Unhappy Refrain',
-        'ローリンガール': 'Rolling Girl',
         'リモコン': 'Remote Control',
         'メランコリック': 'Melancholic',
         '恋愛裁判': 'Love Trial',
@@ -98,8 +97,6 @@ def get_english_translation(title, artist, song_id):
         '竹取飛翔': 'Lunatic Princess',
         '月に叢雲華に風': 'Broken Moon',
         'エクステンドアッシュ': 'Extend Ash',
-        'ウサテイ': 'U.N. Owen Was Her?',
-        '患部で止まってすぐ溶ける～狂気の優曇華院': 'Tamusic - Rabbit Jumping',
         '全人類ノ非想天則': 'Zengen Banrai',
         '放課後ストライド': 'After School Stride',
         'しゅわスパ大作戦☆': 'Shuwa Spa Strategy',
@@ -205,7 +202,7 @@ def get_english_translation(title, artist, song_id):
         '寝起きヤシの木': 'Waking Yashinoki',
         'あなたは世界の終わりにずんだを食べるのだ': 'You will eat Zunda at the end of the world',
         'ライアーダンサー': 'Liar Dancer',
-        '悪戯センセーション': 'Mischievious Sensation',
+        '悪戯センセーション': 'Mischievous Sensation',
         '拝啓、最高の思い出たち': 'Dear my sweet memories',
         'キミノヨゾラ哨戒班': 'Night Sky Patrol of Tomorrow',
         '星界ちゃんと可不ちゃんのおつかい合騒曲':'Sekai-Chan and Kafu-Chan\'s Otsukai Gassoukyoku',
@@ -252,7 +249,7 @@ def get_romaji_override(title):
         'パラマウント☆ショータイム！！': 'Paramount Showtime!!',
         'VeRForTe αRtE:VEiN': 'Verforte Arte Vein',
         '系ぎて': 'Tsunagite',
-        '独りんぼエンヴィー ': 'Hitorinbo Envy',
+        '独りんぼエンヴィー': 'Hitorinbo Envy',
         'テリトリーバトル': 'Territory Battle',
         'キャットラビング': 'Cat Loving',
         'ミルキースター・シューティングスター': 'Milky Star, Shooting Star',
@@ -295,6 +292,9 @@ def get_romaji_override(title):
         'すーぱーぬこになりたい': 'Want to be a Super Cat',
         'その群青が愛しかったようだった': 'That Azure Seemed Beloved',
         '絵の上手かった友達': 'Friend Who Was Good at Drawing',
+        'ワンダーラスト': 'Wanderlust',
+        'ジャガーノート': 'Juggernaut',
+        'アリサのテーマ': 'Alisa\'s Theme',
         '乗ってけ！ジャパリビート': 'Ride On! Japari Beat',
         # Additional romaji overrides for better matching
         '1/3の純情な感情': '1/3 no Junjou na Kanjou',
@@ -372,7 +372,7 @@ def get_romaji_override(title):
         'ワンダーラスト': 'Wanderlust',
         'ジャガーノート': 'Juggernaut',
         'SUSHI食べたい feat.ソイソース': 'SUSHI Tabetai feat. Soy Sauce',
-        'POPPY PAPPY DAY': 'Poppy Pappy Day',
+        'ウサテイ': 'Usatei',
     }
     return romaji_overrides.get(title, None)
 

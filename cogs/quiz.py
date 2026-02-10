@@ -626,7 +626,7 @@ class QuizCog(commands.Cog):
             embed.add_field(name="🎤 Artist", value="???", inline=True)
             embed.add_field(name="📝 Title", value=song.get('romaji') or song.get('title'), inline=True)
         elif game.answer_type == 'difficulty':
-            embed.add_field(name=" Difficulty", value="???", inline=True)
+            embed.add_field(name="Difficulty", value="???", inline=True)
         else:  # title mode
             embed.add_field(name="📝 Title", value="???", inline=True)
         
@@ -1514,8 +1514,9 @@ class QuizCog(commands.Cog):
         
         lb_text = ""
         for i, (user_id, score) in enumerate(leaderboard[:10], 1):
+            display_name = game.display_names.get(user_id, f"<@{user_id}>")
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            lb_text += f"{medal} <@{user_id}>: {score} point(s)\n"
+            lb_text += f"{medal} {display_name}: {score} point(s)\n"
         
         embed.description = lb_text
         embed.set_footer(text=f"Round {game.current_round}/{game.total_rounds}")
