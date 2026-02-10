@@ -137,6 +137,7 @@ class GameSession:
         self.song_pool: List[dict] = config.get('song_pool', [])
         self.current_song: Optional[dict] = None
         self.scores: Dict[int, int] = {}  # user_id -> score
+        self.display_names: Dict[int, str] = {}  # user_id -> display_name
         self.round_start_time: Optional[datetime] = None
         self.timeout_task: Optional[asyncio.Task] = None
         self.answered = False  # Track if someone answered this round
@@ -150,9 +151,10 @@ class GameSession:
         self.answered = False
         return self.current_song
     
-    def add_score(self, user_id: int, points: int = 1):
-        """Add points to a user's score."""
+    def add_score(self, user_id: int, display_name: str, points: int = 1):
+        """Add points to a user's score and store their display name."""
         self.scores[user_id] = self.scores.get(user_id, 0) + points
+        self.display_names[user_id] = display_name
     
     def get_leaderboard(self) -> List[tuple]:
         """Get sorted leaderboard (user_id, score)."""
@@ -768,7 +770,7 @@ class QuizCog(commands.Cog):
             response_time = (datetime.now() - game.round_start_time).total_seconds()
             
             # Add score
-            game.add_score(message.author.id, 1)
+            game.add_score(message.author.id, message.author.display_name, 1)
             
             # Get correct answer
             song = game.current_song
@@ -919,9 +921,9 @@ class QuizCog(commands.Cog):
         )
         
         for i, (user_id, score) in enumerate(leaderboard[:10], 1):
-            user = await self.bot.fetch_user(user_id)
+            display_name = game.display_names.get(user_id, f"<@{user_id}>")
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            embed.add_field(name=f"{medal} {user.display_name}", value=f"{score} point(s)", inline=False)
+            embed.add_field(name=f"{medal} {display_name}", value=f"{score} point(s)", inline=False)
         
         try:
             await interaction.response.send_message(embed=embed)
@@ -980,28 +982,7 @@ class QuizCog(commands.Cog):
                 
                 # Add top 3
                 for i, (user_id, score) in enumerate(leaderboard[:3], 1):
-                    display_name = None
-                    # Try getting from guild members first
-                    if channel.guild:
-                        member = channel.guild.get_member(user_id)
-                        if member:
-                            display_name = member.display_name
-                    # Try bot's user cache
-                    if not display_name:
-                        user = self.bot.get_user(user_id)
-                        if user:
-                            display_name = user.display_name
-                    # Last resort: fetch from API
-                    if not display_name:
-                        try:
-                            user = await self.bot.fetch_user(user_id)
-                            if user:
-                                display_name = user.display_name
-                        except Exception as e:
-                            print(f"Failed to fetch user {user_id}: {e}")
-                    # Final fallback: use mention format
-                    if not display_name:
-                        display_name = f"<@{user_id}>"
+                    display_name = game.display_names.get(user_id, f"<@{user_id}>")
                     medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉"
                     embed.add_field(name=f"{medal} {display_name}", value=f"{score} point(s)", inline=False)
                 
