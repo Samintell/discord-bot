@@ -227,6 +227,7 @@ def get_english_translation(title, artist, song_id):
         '匿名M': 'Anonymous M',
         'ロミオとシンデレラ': 'Romeo and Cinderella',
         'デビルじゃないもん': '(Not) a Devil',
+        '右に曲ガール': 'Migi ni Ma Girl',
     }
     
     if title in known_translations:
@@ -390,6 +391,10 @@ def get_romaji_override(title):
         'ジャガーノート': 'Juggernaut',
         'SUSHI食べたい feat.ソイソース': 'SUSHI Tabetai feat. Soy Sauce',
         'ウサテイ': 'Usatei',
+        'おべんきょうたいむ': 'Obenkyou Time',
+        '右に曲ガール': 'Migi ni Magaru',
+        'ハードコア・シンドローム': 'Hardcore Syndrome',
+        '怒槌': 'Ikazuchi'
     }
     return romaji_overrides.get(title, None)
 
