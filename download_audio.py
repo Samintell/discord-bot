@@ -11,6 +11,7 @@ import time
 
 # Configuration
 AUDIO_DIR = Path("audio")
+NEW_SONGS_DIR = Path("new_songs")
 OUTPUT_JSON = Path("output.json")
 AUDIO_FORMAT = "mp3"
 AUDIO_QUALITY = "5"  # 0=best, 9=worst
@@ -21,6 +22,19 @@ DEBUG = False  # Set to True for verbose output to debug 403 errors
 
 # Create audio directory if it doesn't exist
 AUDIO_DIR.mkdir(exist_ok=True)
+NEW_SONGS_DIR.mkdir(exist_ok=True)
+
+def copy_to_new_songs(audio_path: Path):
+    """Copy an audio file to the new_songs directory."""
+    import shutil
+    try:
+        dest_path = NEW_SONGS_DIR / audio_path.name
+        shutil.copy2(audio_path, dest_path)
+        print(f"  📋 Copied to new_songs/: {audio_path.name}")
+        return True
+    except Exception as e:
+        print(f"  ⚠️  Failed to copy to new_songs/: {e}")
+        return False
 
 def load_songs():
     """Load and filter songs from output.json (master difficulty only)."""
@@ -208,6 +222,8 @@ def main():
         # Download audio
         if download_audio(video_url, audio_path):
             print(f"  ✅ Saved: {audio_filename}")
+            # Copy to new_songs directory
+            copy_to_new_songs(audio_path)
             downloaded += 1
         else:
             print(f"  ❌ Failed to download")
