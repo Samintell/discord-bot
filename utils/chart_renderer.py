@@ -67,7 +67,7 @@ class ChartRenderer:
         self,
         chart_path: Path,
         excerpt_duration: float = 7.0,
-        fps: int = 20,
+        fps: int = 12,
     ) -> Optional[Path]:
         """
         Render a random excerpt of a chart as an animated GIF.
@@ -108,9 +108,6 @@ class ChartRenderer:
             if not frames or len(frames) < 5:
                 return None
 
-            # Calculate actual capture framerate
-            actual_fps = len(frames) / excerpt_duration
-
             # Compile into GIF
             GIF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
             output_path = (
@@ -118,7 +115,7 @@ class ChartRenderer:
                 / f"chart_{int(datetime.now().timestamp())}_{random.randint(0, 9999)}.gif"
             )
 
-            success = self._compile_gif(frames, actual_fps, output_path)
+            success = self._compile_gif(frames, fps, output_path)
             return output_path if success else None
 
         except Exception as e:
@@ -134,10 +131,11 @@ class ChartRenderer:
         fps: int,
     ) -> list:
         """
-        Inject chart notation, seek to position, and capture frames during playback.
+        Inject chart notation, seek to position, and capture frames using virtual time.
 
-        Captures as fast as possible during real-time playback, then the GIF
-        is saved at the effective capture framerate for smooth animation.
+        Overrides the browser's time functions so each frame is rendered at a
+        precise time step, independent of machine speed. This ensures consistent
+        GIF quality on all hardware (fast desktop or slow VPS).
 
         Returns:
             List of PNG frame bytes
@@ -173,18 +171,48 @@ class ChartRenderer:
         )
         await asyncio.sleep(0.3)
 
+        # Install virtual time control before starting playback.
+        # This overrides the browser's time functions so we can step through
+        # the animation at a fixed framerate regardless of real elapsed time.
+        await page.evaluate("""(() => {
+            const origPerfNow = performance.now.bind(performance);
+            window.__virtualTime = origPerfNow();
+
+            // Override performance.now() to return virtual time
+            performance.now = () => window.__virtualTime;
+
+            // Override Date.now() to stay in sync
+            const dateOffset = Date.now() - window.__virtualTime;
+            Date.now = () => Math.floor(window.__virtualTime + dateOffset);
+
+            // Override requestAnimationFrame to pass virtual time to callbacks
+            const origRAF = window.requestAnimationFrame.bind(window);
+            window.requestAnimationFrame = function(cb) {
+                return origRAF(() => cb(window.__virtualTime));
+            };
+        })()""")
+
         canvas = page.locator("#chartCanvas")
 
         # Start playback
         await page.click("#playPauseButton")
         await asyncio.sleep(0.05)
 
-        # Capture frames as fast as possible during real-time playback
-        import time
+        # Capture frames with fixed time stepping
+        frame_interval_ms = 1000.0 / fps
+        total_frames = int(duration * fps)
         frames = []
-        start_time = time.monotonic()
 
-        while time.monotonic() - start_time < duration:
+        for _ in range(total_frames):
+            # Advance virtual time by one frame interval
+            await page.evaluate(f"window.__virtualTime += {frame_interval_ms}")
+
+            # Wait for the animation to render with the new time
+            await page.evaluate(
+                "new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))"
+            )
+
+            # Capture frame
             try:
                 frame_bytes = await canvas.screenshot(type="png")
                 frames.append(frame_bytes)

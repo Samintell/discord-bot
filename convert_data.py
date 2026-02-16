@@ -229,6 +229,7 @@ def get_english_translation(title, artist, song_id):
         'デビルじゃないもん': '(Not) a Devil',
         '右に曲ガール': 'Migi ni Ma Girl',
         'サイバーサンダーサイダー': 'Cyber Thunder Cider',
+        'スナネコのうた': 'Sand Cat Song',
     }
     
     if title in known_translations:
@@ -395,7 +396,8 @@ def get_romaji_override(title):
         'おべんきょうたいむ': 'Obenkyou Time',
         '右に曲ガール': 'Migi ni Magaru',
         'ハードコア・シンドローム': 'Hardcore Syndrome',
-        '怒槌': 'Ikazuchi'
+        '怒槌': 'Ikazuchi',
+        'ずんだパーリナイ': 'Zunda Party Night',
     }
     return romaji_overrides.get(title, None)
 

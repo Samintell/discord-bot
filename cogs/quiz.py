@@ -141,6 +141,7 @@ class GameSession:
         self.round_start_time: Optional[datetime] = None
         self.timeout_task: Optional[asyncio.Task] = None
         self.answered = False  # Track if someone answered this round
+        self._next_gif_future: Optional[asyncio.Task] = None  # Pre-rendered chart GIF task
         
     def next_song(self) -> Optional[dict]:
         """Get the next song from the pool."""
@@ -177,6 +178,33 @@ class QuizCog(commands.Cog):
             self._chart_renderer = ChartRenderer()
             await self._chart_renderer.initialize()
         return self._chart_renderer
+
+    async def _prerender_next_chart(self, game: GameSession) -> Optional[str]:
+        """Pre-render the next round's chart GIF in the background.
+
+        Returns the path to the generated GIF file, or None on failure.
+        """
+        try:
+            if not game.song_pool:
+                return None
+
+            # Peek at the next song without popping
+            next_song = game.song_pool[0]
+            chart_path = get_song_chart_path(next_song)
+            if not chart_path:
+                return None
+
+            renderer = await self.get_chart_renderer()
+            gif_path = await renderer.render_chart_gif(
+                chart_path=chart_path,
+                excerpt_duration=float(game.snippet_length),
+            )
+            return str(gif_path) if gif_path else None
+        except asyncio.CancelledError:
+            return None
+        except Exception as e:
+            print(f"Error pre-rendering chart: {e}")
+            return None
 
     async def cog_unload(self):
         """Clean up when cog is unloaded."""
@@ -700,36 +728,55 @@ class QuizCog(commands.Cog):
             else:
                 pass  # No audio file available
         elif game.mode == 'chart':
-            chart_path = get_song_chart_path(song)
-            if chart_path:
+            gif_path = None
+
+            # Check if a pre-rendered GIF is available from the previous round
+            if game._next_gif_future is not None:
                 try:
-                    renderer = await self.get_chart_renderer()
-                    gif_path = await renderer.render_chart_gif(
-                        chart_path=chart_path,
-                        excerpt_duration=float(game.snippet_length),
-                    )
-                    if gif_path:
-                        file = discord.File(str(gif_path), filename="chart.gif")
-                        embed.set_image(url="attachment://chart.gif")
-                        await channel.send(embed=embed, file=file, view=skip_view)
-                        # Clean up temporary GIF
-                        try:
-                            gif_path.unlink()
-                        except Exception:
-                            pass
-                    else:
-                        await channel.send(
-                            content="(Chart rendering failed)",
-                            embed=embed, view=skip_view
+                    prerendered_path = await game._next_gif_future
+                    if prerendered_path and Path(prerendered_path).exists():
+                        gif_path = Path(prerendered_path)
+                except Exception:
+                    pass
+                finally:
+                    game._next_gif_future = None
+
+            # If no pre-render available (round 1 or pre-render failed), render synchronously
+            if gif_path is None:
+                chart_path = get_song_chart_path(song)
+                if chart_path:
+                    try:
+                        renderer = await self.get_chart_renderer()
+                        gif_path = await renderer.render_chart_gif(
+                            chart_path=chart_path,
+                            excerpt_duration=float(game.snippet_length),
                         )
-                except Exception as e:
-                    print(f"Error rendering chart: {e}")
-                    await channel.send(embed=embed, view=skip_view)
+                    except Exception as e:
+                        print(f"Error rendering chart: {e}")
+
+            if gif_path:
+                file = discord.File(str(gif_path), filename="chart.gif")
+                embed.set_image(url="attachment://chart.gif")
+                await channel.send(embed=embed, file=file, view=skip_view)
+                # Clean up temporary GIF
+                try:
+                    Path(gif_path).unlink()
+                except Exception:
+                    pass
             else:
-                await channel.send(embed=embed, view=skip_view)
+                await channel.send(
+                    content="(Chart rendering failed)",
+                    embed=embed, view=skip_view
+                )
 
         # Start timeout timer
         game.timeout_task = asyncio.create_task(self.round_timeout(channel))
+
+        # Pre-render next chart GIF in the background while players guess
+        if game.mode == 'chart' and game.song_pool:
+            game._next_gif_future = asyncio.create_task(
+                self._prerender_next_chart(game)
+            )
     
     async def round_timeout(self, channel: discord.TextChannel):
         """Handle round timeout."""
@@ -1014,6 +1061,17 @@ class QuizCog(commands.Cog):
         # Cancel any pending timeout
         if game.timeout_task:
             game.timeout_task.cancel()
+
+        # Cancel any pending chart pre-render and clean up its file
+        if game._next_gif_future is not None:
+            game._next_gif_future.cancel()
+            try:
+                result = await game._next_gif_future
+                if result and Path(result).exists():
+                    Path(result).unlink()
+            except (asyncio.CancelledError, Exception):
+                pass
+            game._next_gif_future = None
         
         try:
             # Create final results embed
