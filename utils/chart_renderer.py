@@ -4,6 +4,7 @@ Generates animated GIF excerpts of MaiMai chart patterns for the chart quiz mode
 """
 
 import asyncio
+import functools
 import io
 import random
 import re
@@ -18,8 +19,8 @@ CHARTS_DIR = PROJECT_ROOT / "charts"
 GIF_CACHE_DIR = CHARTS_DIR / "gif_cache"
 PLAYER_URL = "https://mai-notes.com/player"
 
-# Max width for GIF frames (keeps file size reasonable without optimize=True)
-MAX_FRAME_WIDTH = 400
+# Canvas size for rendering (smaller = much faster screenshots)
+CANVAS_SIZE = 300
 
 
 def extract_chart_notation(simai_data: str) -> str:
@@ -66,9 +67,23 @@ class ChartRenderer:
         if not self._browser:
             await self.initialize()
 
-        self._page = await self._browser.new_page()
+        self._page = await self._browser.new_page(
+            viewport={"width": CANVAS_SIZE + 50, "height": CANVAS_SIZE + 200}
+        )
         await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(1)  # Wait for player JS to initialize
+        await asyncio.sleep(1)
+
+        # Resize the canvas once so all future screenshots are small
+        await self._page.evaluate(f"""(() => {{
+            const canvas = document.querySelector('#chartCanvas');
+            if (canvas) {{
+                canvas.width = {CANVAS_SIZE};
+                canvas.height = {CANVAS_SIZE};
+                canvas.style.width = '{CANVAS_SIZE}px';
+                canvas.style.height = '{CANVAS_SIZE}px';
+            }}
+        }})()""")
+
         return self._page
 
     async def close(self) -> None:
@@ -87,7 +102,7 @@ class ChartRenderer:
         self,
         chart_path: Path,
         excerpt_duration: float = 7.0,
-        fps: int = 12,
+        fps: int = 8,
     ) -> Optional[Path]:
         """
         Render a random excerpt of a chart as an animated GIF.
@@ -132,17 +147,20 @@ class ChartRenderer:
             self._page = None
             return None
 
-        if not frames or len(frames) < 5:
+        if not frames or len(frames) < 3:
             return None
 
-        # Compile into GIF
+        # Compile GIF in a thread to avoid blocking the event loop
         GIF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         output_path = (
             GIF_CACHE_DIR
             / f"chart_{int(datetime.now().timestamp())}_{random.randint(0, 9999)}.gif"
         )
 
-        success = self._compile_gif(frames, fps, output_path)
+        loop = asyncio.get_event_loop()
+        success = await loop.run_in_executor(
+            None, functools.partial(self._compile_gif, frames, fps, output_path)
+        )
         return output_path if success else None
 
     async def _inject_and_capture(
@@ -160,7 +178,7 @@ class ChartRenderer:
         injects new chart data, and captures frames without re-navigating.
 
         Returns:
-            List of PNG frame bytes
+            List of JPEG frame bytes
         """
         # Reset page state: stop playback and restore native time functions
         await page.evaluate("""(() => {
@@ -222,23 +240,25 @@ class ChartRenderer:
         await page.click("#playPauseButton")
         await asyncio.sleep(0.05)
 
-        # Capture frames with fixed time stepping
+        # Capture frames with fixed time stepping.
+        # Combine time advance + rAF wait into a single evaluate call
+        # to reduce IPC round-trips (2 calls → 1 per frame).
         frame_interval_ms = 1000.0 / fps
         total_frames = int(duration * fps)
         frames = []
 
         for _ in range(total_frames):
-            # Advance virtual time by one frame interval
-            await page.evaluate(f"window.__virtualTime += {frame_interval_ms}")
-
-            # Wait for the animation to render with the new time
+            # Advance virtual time and wait for render in one call
             await page.evaluate(
-                "new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))"
+                f"""(() => {{
+                window.__virtualTime += {frame_interval_ms};
+                return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            }})()"""
             )
 
-            # Capture frame
+            # Capture frame as JPEG (much faster than PNG on CPU-limited VPS)
             try:
-                frame_bytes = await canvas.screenshot(type="png")
+                frame_bytes = await canvas.screenshot(type="jpeg", quality=70)
                 frames.append(frame_bytes)
             except Exception:
                 break
@@ -253,9 +273,9 @@ class ChartRenderer:
 
     def _compile_gif(self, frames: list, fps: int, output_path: Path) -> bool:
         """
-        Compile PNG frames into animated GIF.
+        Compile JPEG frames into animated GIF.
 
-        Downscales frames to MAX_FRAME_WIDTH to keep file size small.
+        Runs in a thread executor to avoid blocking the event loop.
 
         Returns:
             True on success
@@ -264,19 +284,11 @@ class ChartRenderer:
             images = []
             for frame_bytes in frames:
                 img = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
-                # Downscale if wider than MAX_FRAME_WIDTH
-                w, h = img.size
-                if w > MAX_FRAME_WIDTH:
-                    scale = MAX_FRAME_WIDTH / w
-                    img = img.resize(
-                        (MAX_FRAME_WIDTH, int(h * scale)), Image.LANCZOS
-                    )
                 images.append(img)
 
             if not images:
                 return False
 
-            # Save as animated GIF (optimize=False for speed on VPS)
             duration_ms = int(1000 / fps)
             images[0].save(
                 str(output_path),
@@ -288,7 +300,7 @@ class ChartRenderer:
                 optimize=False,
             )
 
-            # Check file size - if too large (>8MB), reduce further
+            # If too large for Discord (>8MB), halve the resolution
             file_size = output_path.stat().st_size
             if file_size > 8 * 1024 * 1024:
                 smaller = []
