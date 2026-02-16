@@ -4,6 +4,7 @@ Generates animated GIF excerpts of MaiMai chart patterns for the chart quiz mode
 """
 
 import asyncio
+import base64
 import functools
 import io
 import random
@@ -73,7 +74,7 @@ class ChartRenderer:
         await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
         await asyncio.sleep(1)
 
-        # Resize the canvas once so all future screenshots are small
+        # Resize the canvas once so all future captures are small
         await self._page.evaluate(f"""(() => {{
             const canvas = document.querySelector('#chartCanvas');
             if (canvas) {{
@@ -102,7 +103,7 @@ class ChartRenderer:
         self,
         chart_path: Path,
         excerpt_duration: float = 7.0,
-        fps: int = 8,
+        fps: int = 10,
     ) -> Optional[Path]:
         """
         Render a random excerpt of a chart as an animated GIF.
@@ -234,31 +235,31 @@ class ChartRenderer:
             };
         })()""")
 
-        canvas = page.locator("#chartCanvas")
-
         # Start playback
         await page.click("#playPauseButton")
         await asyncio.sleep(0.05)
 
         # Capture frames with fixed time stepping.
-        # Combine time advance + rAF wait into a single evaluate call
-        # to reduce IPC round-trips (2 calls → 1 per frame).
+        # Use canvas.toDataURL() instead of Playwright screenshot to capture
+        # only raw canvas pixels (no DOM artifacts, parent styling, or overlays).
+        # Time advance + frame capture combined into a single evaluate call.
         frame_interval_ms = 1000.0 / fps
         total_frames = int(duration * fps)
         frames = []
 
         for _ in range(total_frames):
-            # Advance virtual time and wait for render in one call
-            await page.evaluate(
-                f"""(() => {{
-                window.__virtualTime += {frame_interval_ms};
-                return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-            }})()"""
-            )
-
-            # Capture frame as JPEG (much faster than PNG on CPU-limited VPS)
+            # Advance virtual time, wait for render, and capture canvas pixels
             try:
-                frame_bytes = await canvas.screenshot(type="jpeg", quality=70)
+                data_url = await page.evaluate(
+                    f"""(() => {{
+                    window.__virtualTime += {frame_interval_ms};
+                    return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => {{
+                        const c = document.querySelector('#chartCanvas');
+                        r(c.toDataURL('image/jpeg', 0.7));
+                    }})));
+                }})()"""
+                )
+                frame_bytes = base64.b64decode(data_url.split(',')[1])
                 frames.append(frame_bytes)
             except Exception:
                 break
