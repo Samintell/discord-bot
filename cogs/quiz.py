@@ -40,7 +40,12 @@ class SkipButton(ui.View):
         if not game:
             await interaction.response.send_message("❌ No active game!", ephemeral=True)
             return
-        
+
+        # Don't allow skip while round is still loading
+        if not game.round_ready:
+            await interaction.response.send_message("❌ Round is still loading!", ephemeral=True)
+            return
+
         # Only host can skip
         if interaction.user.id != self.host_id:
             await interaction.response.send_message("❌ Only the host can skip!", ephemeral=True)
@@ -143,6 +148,7 @@ class GameSession:
         self.round_start_time: Optional[datetime] = None
         self.timeout_task: Optional[asyncio.Task] = None
         self.answered = False  # Track if someone answered this round
+        self.round_ready = False  # True after media is sent and guesses are accepted
         self._next_gif_future: Optional[asyncio.Task] = None  # Pre-rendered chart GIF task
         
     def next_song(self) -> Optional[dict]:
@@ -152,6 +158,7 @@ class GameSession:
         self.current_round += 1
         self.current_song = self.song_pool.pop(0)
         self.answered = False
+        self.round_ready = False
         return self.current_song
     
     def add_score(self, user_id: int, display_name: str, points: int = 1):
@@ -780,6 +787,15 @@ class QuizCog(commands.Cog):
                     except Exception as e:
                         print(f"Error rendering chart: {e}")
 
+            # Bail out if someone answered/skipped during rendering
+            if game.answered:
+                if gif_path:
+                    try:
+                        Path(gif_path).unlink()
+                    except Exception:
+                        pass
+                return
+
             if gif_path:
                 file = discord.File(str(gif_path), filename="chart.gif")
                 embed.set_image(url="attachment://chart.gif")
@@ -794,6 +810,9 @@ class QuizCog(commands.Cog):
                     content="(Chart rendering failed)",
                     embed=embed, view=skip_view
                 )
+
+        # Round is now ready to accept guesses
+        game.round_ready = True
 
         # Start timeout timer
         game.timeout_task = asyncio.create_task(self.round_timeout(channel))
@@ -876,6 +895,10 @@ class QuizCog(commands.Cog):
         # Check if already answered
         if game.answered:
             return
+
+        # Don't accept guesses until round media is fully sent
+        if not game.round_ready:
+            return
         
         # Check answer
         if check_answer(message.content, game.current_song, game.answer_type):
@@ -950,6 +973,14 @@ class QuizCog(commands.Cog):
                 await interaction.response.send_message("❌ Only the host can skip rounds!", ephemeral=True)
             except discord.errors.NotFound:
                 await interaction.channel.send("❌ Only the host can skip rounds!")
+            return
+
+        # Don't allow skip while round is still loading
+        if not game.round_ready:
+            try:
+                await interaction.response.send_message("❌ Round is still loading!", ephemeral=True)
+            except discord.errors.NotFound:
+                pass
             return
         
         # Respond to interaction immediately
@@ -1642,7 +1673,11 @@ class QuizCog(commands.Cog):
         if ctx.author.id != game.host_id:
             await ctx.send("❌ Only the host can skip rounds!")
             return
-        
+
+        if not game.round_ready:
+            await ctx.send("❌ Round is still loading!")
+            return
+
         await self.perform_skip(ctx.channel, game)
     
     @commands.command(name="stop")
