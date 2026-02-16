@@ -130,7 +130,9 @@ class GameSession:
             'image_difficulty': self.image_difficulty,
             'categories': config.get('categories'),
             'versions': config.get('versions'),
-            'region': config.get('region', 'any')
+            'region': config.get('region', 'any'),
+            'level_min': config.get('level_min'),
+            'level_max': config.get('level_max')
         }
         
         self.current_round = 0
@@ -351,7 +353,9 @@ class QuizCog(commands.Cog):
         image_difficulty="Image visibility (easy=full, medium=25%, hard=10%)",
         categories="Comma-separated (e.g. 'POPS＆アニメ,東方Project') or leave empty for all",
         versions="Comma-separated (e.g. 'FESTiVAL,BUDDiES,PRiSM') or leave empty for all",
-        region="Filter by game region availability"
+        region="Filter by game region availability",
+        level_min="Minimum chart level (e.g. 10)",
+        level_max="Maximum chart level (e.g. 13.9)"
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Image", value="image"),
@@ -385,7 +389,9 @@ class QuizCog(commands.Cog):
         image_difficulty: str = "easy",
         categories: Optional[str] = None,
         versions: Optional[str] = None,
-        region: str = "usa"
+        region: str = "usa",
+        level_min: Optional[float] = None,
+        level_max: Optional[float] = None
     ):
         """Start a new quiz game."""
         channel_id = interaction.channel_id
@@ -489,7 +495,13 @@ class QuizCog(commands.Cog):
             # Filter by region if specified
             if region_filter:
                 all_songs = [s for s in all_songs if region_filter in s.get('regions', [])]
-            
+
+            # Filter by level range if specified
+            if level_min is not None:
+                all_songs = [s for s in all_songs if s.get('level', 0) >= level_min]
+            if level_max is not None:
+                all_songs = [s for s in all_songs if s.get('level', 0) <= level_max]
+
             songs = all_songs
             
             if not songs:
@@ -531,7 +543,9 @@ class QuizCog(commands.Cog):
                 'song_pool': song_pool,
                 'categories': categories,  # Store original input for replay
                 'versions': versions,  # Store original input for replay
-                'region': region  # Store region for replay
+                'region': region,  # Store region for replay
+                'level_min': level_min,
+                'level_max': level_max
             }
             
             game = GameSession(channel_id, interaction.user.id, config)
@@ -548,10 +562,16 @@ class QuizCog(commands.Cog):
             if region_filter:
                 region_labels = {'jp': 'Japan', 'intl': 'International', 'usa': 'USA'}
                 region_text = f"\n**Region:** {region_labels.get(region_filter, region_filter)}"
-            
+
+            level_text = ""
+            if level_min is not None or level_max is not None:
+                min_str = str(level_min) if level_min is not None else "any"
+                max_str = str(level_max) if level_max is not None else "any"
+                level_text = f"\n**Level Range:** {min_str} - {max_str}"
+
             embed = discord.Embed(
                 title="🎵 MaiMai Song Quiz Started!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}{region_text}",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}{region_text}{level_text}",
                 color=discord.Color.blue()
             )
             
@@ -1168,7 +1188,15 @@ class QuizCog(commands.Cog):
             region_filter = None if region == 'any' else region
             if region_filter:
                 all_songs = [s for s in all_songs if region_filter in s.get('regions', [])]
-            
+
+            # Apply level range filter if it was used
+            level_min = config.get('level_min')
+            level_max = config.get('level_max')
+            if level_min is not None:
+                all_songs = [s for s in all_songs if s.get('level', 0) >= level_min]
+            if level_max is not None:
+                all_songs = [s for s in all_songs if s.get('level', 0) <= level_max]
+
             songs = all_songs
             
             if not songs:
@@ -1221,10 +1249,16 @@ class QuizCog(commands.Cog):
             if region_filter:
                 region_labels = {'jp': 'Japan', 'intl': 'International', 'usa': 'USA'}
                 region_text = f"\n**Region:** {region_labels.get(region_filter, region_filter)}"
-            
+
+            level_text = ""
+            if level_min is not None or level_max is not None:
+                min_str = str(level_min) if level_min is not None else "any"
+                max_str = str(level_max) if level_max is not None else "any"
+                level_text = f"\n**Level Range:** {min_str} - {max_str}"
+
             embed = discord.Embed(
                 title="🔁 Quiz Restarting!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}{region_text}",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}{region_text}{level_text}",
                 color=discord.Color.green()
             )
             
@@ -1477,10 +1511,11 @@ class QuizCog(commands.Cog):
     # ==================== PREFIX COMMANDS (q>) ====================
     
     @commands.command(name="quiz")
-    async def prefix_quiz(self, ctx, mode: str = "audio", answer_type: str = "title", 
+    async def prefix_quiz(self, ctx, mode: str = "audio", answer_type: str = "title",
                           rounds: int = 10, time_limit: int = 20, snippet_length: int = 10,
-                          image_difficulty: str = "easy"):
-        """Start a quiz game with prefix command. Usage: q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty]"""
+                          image_difficulty: str = "easy", level_min: float = None,
+                          level_max: float = None):
+        """Start a quiz game with prefix command. Usage: q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty] [level_min] [level_max]"""
         # Create a fake interaction-like object for compatibility
         channel_id = ctx.channel.id
         
@@ -1512,8 +1547,15 @@ class QuizCog(commands.Cog):
         try:
             # Load songs
             all_songs = load_songs(difficulty="master")
+
+            # Filter by level range if specified
+            if level_min is not None:
+                all_songs = [s for s in all_songs if s.get('level', 0) >= level_min]
+            if level_max is not None:
+                all_songs = [s for s in all_songs if s.get('level', 0) <= level_max]
+
             songs = all_songs
-            
+
             if not songs:
                 await ctx.send("❌ No songs found!")
                 self.creating_games.discard(channel_id)
@@ -1550,7 +1592,9 @@ class QuizCog(commands.Cog):
                 'image_difficulty': image_difficulty,
                 'song_pool': song_pool,
                 'categories': None,  # Prefix command doesn't support filters
-                'versions': None
+                'versions': None,
+                'level_min': level_min,
+                'level_max': level_max
             }
             
             game = GameSession(channel_id, ctx.author.id, config)
