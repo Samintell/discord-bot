@@ -560,10 +560,16 @@ class QuizCog(commands.Cog):
             if version_list:
                 embed.add_field(name="Versions", value=", ".join(version_list), inline=False)
             
-            embed.set_footer(text="Get ready! First round starting in 3 seconds...")
+            embed.set_footer(text="Get ready! First round starting soon...")
             
             await interaction.channel.send(embed=embed)
-            
+
+            # For chart mode, start pre-rendering the first chart during countdown
+            if mode == 'chart' and game.song_pool:
+                game._next_gif_future = asyncio.create_task(
+                    self._prerender_next_chart(game)
+                )
+
             # Start first round after delay
             await asyncio.sleep(3)
             await self.start_round(interaction.channel)
@@ -1230,7 +1236,13 @@ class QuizCog(commands.Cog):
             embed.set_footer(text="Get ready! First round starting in 3 seconds...")
             
             await channel.send(embed=embed)
-            
+
+            # For chart mode, start pre-rendering the first chart during countdown
+            if mode == 'chart' and game.song_pool:
+                game._next_gif_future = asyncio.create_task(
+                    self._prerender_next_chart(game)
+                )
+
             # Start the first round after delay
             await asyncio.sleep(3)
             await self.start_round(channel)
@@ -1558,6 +1570,13 @@ class QuizCog(commands.Cog):
             embed.set_footer(text="Get ready! First round starting in 3 seconds...")
             
             await ctx.send(embed=embed)
+
+            # For chart mode, start pre-rendering the first chart during countdown
+            if mode == 'chart' and game.song_pool:
+                game._next_gif_future = asyncio.create_task(
+                    self._prerender_next_chart(game)
+                )
+
             await asyncio.sleep(3)
             await self.start_round(ctx.channel)
             

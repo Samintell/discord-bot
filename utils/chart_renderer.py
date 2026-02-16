@@ -18,6 +18,9 @@ CHARTS_DIR = PROJECT_ROOT / "charts"
 GIF_CACHE_DIR = CHARTS_DIR / "gif_cache"
 PLAYER_URL = "https://mai-notes.com/player"
 
+# Max width for GIF frames (keeps file size reasonable without optimize=True)
+MAX_FRAME_WIDTH = 400
+
 
 def extract_chart_notation(simai_data: str) -> str:
     """
@@ -43,6 +46,7 @@ class ChartRenderer:
     def __init__(self):
         self._browser = None
         self._playwright = None
+        self._page = None  # Reusable page with player already loaded
 
     async def initialize(self) -> None:
         """Launch browser instance. Call once at first use."""
@@ -54,8 +58,24 @@ class ChartRenderer:
             args=["--no-sandbox", "--disable-gpu"],
         )
 
+    async def _get_page(self):
+        """Get or create a reusable page with the player loaded."""
+        if self._page is not None and not self._page.is_closed():
+            return self._page
+
+        if not self._browser:
+            await self.initialize()
+
+        self._page = await self._browser.new_page()
+        await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(1)  # Wait for player JS to initialize
+        return self._page
+
     async def close(self) -> None:
         """Close browser instance. Call at bot shutdown."""
+        if self._page and not self._page.is_closed():
+            await self._page.close()
+            self._page = None
         if self._browser:
             await self._browser.close()
             self._browser = None
@@ -97,30 +117,33 @@ class ChartRenderer:
         start_fraction = random.uniform(0.1, 0.8)
 
         try:
-            page = await self._browser.new_page()
-            try:
-                frames = await self._inject_and_capture(
-                    page, chart_notation, start_fraction, excerpt_duration, fps
-                )
-            finally:
-                await page.close()
-
-            if not frames or len(frames) < 5:
-                return None
-
-            # Compile into GIF
-            GIF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            output_path = (
-                GIF_CACHE_DIR
-                / f"chart_{int(datetime.now().timestamp())}_{random.randint(0, 9999)}.gif"
+            page = await self._get_page()
+            frames = await self._inject_and_capture(
+                page, chart_notation, start_fraction, excerpt_duration, fps
             )
-
-            success = self._compile_gif(frames, fps, output_path)
-            return output_path if success else None
-
         except Exception as e:
-            print(f"Error rendering chart GIF: {e}")
+            print(f"Error capturing chart frames: {e}")
+            # Page may be in a bad state — discard it so next render gets a fresh one
+            if self._page and not self._page.is_closed():
+                try:
+                    await self._page.close()
+                except Exception:
+                    pass
+            self._page = None
             return None
+
+        if not frames or len(frames) < 5:
+            return None
+
+        # Compile into GIF
+        GIF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        output_path = (
+            GIF_CACHE_DIR
+            / f"chart_{int(datetime.now().timestamp())}_{random.randint(0, 9999)}.gif"
+        )
+
+        success = self._compile_gif(frames, fps, output_path)
+        return output_path if success else None
 
     async def _inject_and_capture(
         self,
@@ -133,16 +156,20 @@ class ChartRenderer:
         """
         Inject chart notation, seek to position, and capture frames using virtual time.
 
-        Overrides the browser's time functions so each frame is rendered at a
-        precise time step, independent of machine speed. This ensures consistent
-        GIF quality on all hardware (fast desktop or slow VPS).
+        The page is reused between renders — this method resets playback state,
+        injects new chart data, and captures frames without re-navigating.
 
         Returns:
             List of PNG frame bytes
         """
-        # Navigate to player page
-        await page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(1)
+        # Reset page state: stop playback and restore native time functions
+        await page.evaluate("""(() => {
+            const btn = document.querySelector('#playPauseButton');
+            if (btn && btn.textContent.includes('Pause')) btn.click();
+            if (window.__origPerfNow) performance.now = window.__origPerfNow;
+            if (window.__origDateNow) Date.now = window.__origDateNow;
+            if (window.__origRAF) window.requestAnimationFrame = window.__origRAF;
+        })()""")
 
         # Inject raw chart notation (no metadata) into the textarea
         await page.fill("#simaiInput", chart_notation)
@@ -150,7 +177,7 @@ class ChartRenderer:
             """document.querySelector('#simaiInput')
                .dispatchEvent(new Event('input', {bubbles: true}))"""
         )
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.3)
 
         # Get total measures from the slider
         total_measures = await page.evaluate(
@@ -169,26 +196,23 @@ class ChartRenderer:
             slider.dispatchEvent(new Event('input', {{bubbles: true}}));
         }})()"""
         )
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.1)
 
         # Install virtual time control before starting playback.
-        # This overrides the browser's time functions so we can step through
-        # the animation at a fixed framerate regardless of real elapsed time.
+        # Saves original functions on window so they can be restored for next render.
         await page.evaluate("""(() => {
-            const origPerfNow = performance.now.bind(performance);
-            window.__virtualTime = origPerfNow();
+            window.__origPerfNow = performance.now.bind(performance);
+            window.__virtualTime = window.__origPerfNow();
 
-            // Override performance.now() to return virtual time
             performance.now = () => window.__virtualTime;
 
-            // Override Date.now() to stay in sync
+            window.__origDateNow = Date.now;
             const dateOffset = Date.now() - window.__virtualTime;
             Date.now = () => Math.floor(window.__virtualTime + dateOffset);
 
-            // Override requestAnimationFrame to pass virtual time to callbacks
-            const origRAF = window.requestAnimationFrame.bind(window);
+            window.__origRAF = window.requestAnimationFrame.bind(window);
             window.requestAnimationFrame = function(cb) {
-                return origRAF(() => cb(window.__virtualTime));
+                return window.__origRAF(() => cb(window.__virtualTime));
             };
         })()""")
 
@@ -231,6 +255,8 @@ class ChartRenderer:
         """
         Compile PNG frames into animated GIF.
 
+        Downscales frames to MAX_FRAME_WIDTH to keep file size small.
+
         Returns:
             True on success
         """
@@ -238,12 +264,19 @@ class ChartRenderer:
             images = []
             for frame_bytes in frames:
                 img = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
+                # Downscale if wider than MAX_FRAME_WIDTH
+                w, h = img.size
+                if w > MAX_FRAME_WIDTH:
+                    scale = MAX_FRAME_WIDTH / w
+                    img = img.resize(
+                        (MAX_FRAME_WIDTH, int(h * scale)), Image.LANCZOS
+                    )
                 images.append(img)
 
             if not images:
                 return False
 
-            # Save as animated GIF
+            # Save as animated GIF (optimize=False for speed on VPS)
             duration_ms = int(1000 / fps)
             images[0].save(
                 str(output_path),
@@ -252,13 +285,12 @@ class ChartRenderer:
                 append_images=images[1:],
                 duration=duration_ms,
                 loop=0,
-                optimize=True,
+                optimize=False,
             )
 
-            # Check file size - if too large (>8MB), reduce quality
+            # Check file size - if too large (>8MB), reduce further
             file_size = output_path.stat().st_size
             if file_size > 8 * 1024 * 1024:
-                # Resize all frames to half size
                 smaller = []
                 for img in images:
                     w, h = img.size
@@ -270,7 +302,7 @@ class ChartRenderer:
                     append_images=smaller[1:],
                     duration=duration_ms,
                     loop=0,
-                    optimize=True,
+                    optimize=False,
                 )
 
             return True
