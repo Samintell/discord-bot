@@ -155,3 +155,6 @@ audio/
 images/
 new_songs/
 *.json
+_maichart_repo/
+charts/
+tmpclaude*

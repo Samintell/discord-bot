@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Discord bot for playing "Guess the Song" using MaiMai rhythm game charts. Users are shown song cover images or hear audio snippets and guess the title, artist, or difficulty level.
+Discord bot for playing "Guess the Song" using MaiMai rhythm game data. Users are shown song cover images, hear audio snippets, or see animated chart pattern GIFs and guess the title, artist, or difficulty level.
 
 ## Architecture & Data Flow
 
@@ -11,6 +11,7 @@ Discord bot for playing "Guess the Song" using MaiMai rhythm game charts. Users 
 - **Song Database**: `output.json` contains 21,494+ song entries with metadata
 - **Image Assets**: `images/` folder with 1,700+ PNG cover art files
 - **Audio Assets**: `audio/` folder with MP3 files (same base name as images)
+- **Chart Assets**: `charts/` folder with processed simai chart files (one per song per difficulty)
 - **Discord Interface**: Slash commands (`/quiz`, `/skip`, `/stop`, etc.) and prefix commands (`q>quiz`, `q>skip`, etc.)
 
 ### Song Data Structure
@@ -42,7 +43,7 @@ Each song entry in `output.json`:
 ## Game Logic Design
 
 ### Game Modes & Configuration
-- **Mode**: `image` (show cover art) OR `audio` (play song snippet as voice message)
+- **Mode**: `image` (show cover art), `audio` (play song snippet as voice message), OR `chart` (show animated chart GIF)
 - **Answer Type**: `title`, `artist`, OR `difficulty` (configurable per session)
 - **Time Limit**: 10-300 seconds per round (default: 20s)
 - **Rounds**: 1-50 rounds per game (default: 10)
@@ -64,6 +65,7 @@ Each song entry in `output.json`:
    - Send embed with Skip button (`SkipButton` view)
    - For image mode: crop image based on difficulty setting
    - For audio mode: create OGG Opus snippet via ffmpeg, send as Discord voice message
+   - For chart mode: render simai chart GIF via Playwright + mai-notes.com player
 5. Listen for guesses via `on_message()` listener
 6. Use `check_answer()` from `utils/matcher.py` for fuzzy matching
 7. First correct answer wins point; display response time and answer
@@ -94,15 +96,18 @@ python-dotenv>=0.19.0
 Pillow>=9.0.0
 yt-dlp>=2023.0.0
 requests>=2.28.0
+playwright>=1.40.0
+imageio>=2.31.0
 ```
 
 **External requirement**: `ffmpeg` and `ffprobe` must be installed for audio snippet creation
+**External requirement**: Playwright Chromium browser required for chart mode: `playwright install chromium`
 
 ### Command Structure
 
 #### Slash Commands (Primary)
 - `/quiz` - Start quiz with full options:
-  - `mode`: Image or Audio
+  - `mode`: Image, Audio, or Chart
   - `answer_type`: Title, Artist, or Difficulty Level
   - `rounds`: 1-50 (default: 10)
   - `time_limit`: 10-300 seconds (default: 20)
@@ -131,7 +136,7 @@ requests>=2.28.0
 class GameSession:
     channel_id: int
     host_id: int
-    mode: str  # 'image' or 'audio'
+    mode: str  # 'image', 'audio', or 'chart'
     answer_type: str  # 'title', 'artist', or 'difficulty'
     time_limit: int
     total_rounds: int
@@ -167,6 +172,16 @@ class GameSession:
   - `medium`: Random 50% x 50% crop (25% of area)
   - `hard`: Random ~31.6% x ~31.6% crop (10% of area)
 
+### Chart Handling
+- Chart data downloaded from Maichart-Converts GitHub repo via `download_charts.py`
+- Processed simai chart files stored in `charts/` folder as `{song_id}_{difficulty}.txt`
+- `charts/chart_index.json` maps song_ids to available chart file paths
+- GIF rendering via Playwright + mai-notes.com player (`utils/chart_renderer.py`)
+- `ChartRenderer` class manages browser lifecycle (lazy init, reused across rounds)
+- GIFs are generated on-demand: 5-8 second excerpts at 10fps, 500x500px canvas
+- Temporary GIF files in `charts/gif_cache/` cleaned up after sending to Discord
+- `get_song_chart_path()` in `song_loader.py` resolves chart file paths (falls back to remaster if master not found)
+
 ## File Organization
 
 ```
@@ -177,7 +192,8 @@ discord-bot/
 ├── utils/
 │   ├── constants.py      # CATEGORIES, VERSIONS, and mapping dicts
 │   ├── matcher.py        # check_answer(), fuzzy_match(), normalize_string()
-│   └── song_loader.py    # load_songs(), get_song_image_path(), get_song_audio_path()
+│   ├── song_loader.py    # load_songs(), get_song_image_path(), get_song_audio_path(), get_song_chart_path()
+│   └── chart_renderer.py # ChartRenderer class for GIF generation via Playwright
 ├── .env                  # DISCORD_TOKEN=your_token_here
 ├── .env.example          # Template for .env
 ├── requirements.txt      # Python dependencies
@@ -185,9 +201,14 @@ discord-bot/
 ├── images/               # Cover art PNG files
 ├── audio/                # Full audio MP3 files
 │   └── snippets/         # Temporary audio snippets (auto-cleaned)
+├── charts/               # Processed simai chart files
+│   ├── chart_index.json  # Maps song_id -> chart file paths
+│   ├── gif_cache/        # Temporary chart GIFs (auto-cleaned)
+│   └── *.txt             # Individual simai chart files ({song_id}_{difficulty}.txt)
 ├── new_songs/            # New songs to be added
 ├── convert_data.py       # Data conversion utility
 ├── download_audio.py     # Audio download script using yt-dlp
+├── download_charts.py    # Chart download/processing from Maichart-Converts repo
 ├── manual_audio_download.py  # Manual audio download helper
 ├── replace_audio.py      # Audio replacement utility
 ├── yt-dlp.conf           # yt-dlp configuration
@@ -239,9 +260,11 @@ Both English (lowercase) and Japanese names are accepted for filtering via `CATE
 ### Setup
 1. Install Python 3.8+ and dependencies: `pip install -r requirements.txt`
 2. Install ffmpeg (required for audio mode)
-3. Create Discord bot at https://discord.com/developers/applications
-4. Copy `.env.example` to `.env` and add your token: `DISCORD_TOKEN=your_token_here`
-5. Enable Message Content Intent in Discord Developer Portal
+3. Install Playwright Chromium (required for chart mode): `playwright install chromium`
+4. Create Discord bot at https://discord.com/developers/applications
+5. Copy `.env.example` to `.env` and add your token: `DISCORD_TOKEN=your_token_here`
+6. Enable Message Content Intent in Discord Developer Portal
+7. Download chart data: `python download_charts.py`
 
 ### Running
 ```powershell
@@ -256,7 +279,7 @@ python bot.py
 
 1. **Unicode Handling**: Always open files with `encoding='utf-8'`
 2. **Path Resolution**: Use `pathlib.Path` for cross-platform paths (see `PROJECT_ROOT` in song_loader.py)
-3. **Missing Media Files**: `get_song_image_path()` and `get_song_audio_path()` return `None` if file missing
+3. **Missing Media Files**: `get_song_image_path()`, `get_song_audio_path()`, and `get_song_chart_path()` return `None` if file missing
 4. **Master/Remaster Filter**: Both difficulties accepted, deduplication keeps highest level
 5. **Concurrent Games**: One game per channel; `creating_games` set prevents race conditions
 6. **Race Conditions**: `game.answered` flag ensures only first correct answer scores
@@ -265,6 +288,8 @@ python bot.py
 9. **Audio Mode Requirements**: ffmpeg/ffprobe must be in PATH for snippet creation
 10. **Voice Message API**: Uses low-level Discord API with IS_VOICE_MESSAGE flag (8192)
 11. **Interaction Timeouts**: Respond to interactions immediately, then perform async work
+12. **Chart Mode Dependencies**: Requires Playwright + Chromium browser; `ChartRenderer` lazy-initialized on first chart quiz
+13. **Chart GIF Latency**: GIF generation takes ~7-14 seconds; chart is rendered during round setup
 
 ## Bot Token Security
 - **Never commit** `.env` or hardcoded tokens to git

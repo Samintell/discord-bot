@@ -228,6 +228,7 @@ def get_english_translation(title, artist, song_id):
         'ロミオとシンデレラ': 'Romeo and Cinderella',
         'デビルじゃないもん': '(Not) a Devil',
         '右に曲ガール': 'Migi ni Ma Girl',
+        'サイバーサンダーサイダー': 'Cyber Thunder Cider',
     }
     
     if title in known_translations:

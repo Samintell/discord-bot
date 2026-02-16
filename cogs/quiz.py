@@ -17,7 +17,7 @@ import sys
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path
+from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path, get_song_chart_path
 from utils.matcher import check_answer
 from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING, REGIONS, REGION_MAPPING
 
@@ -117,7 +117,7 @@ class GameSession:
         self.answer_type = config.get('answer_type', 'title')  # 'title' or 'artist'
         self.time_limit = config.get('time_limit', 60)
         self.total_rounds = config.get('rounds', 10)
-        self.snippet_length = config.get('snippet_length', 10)  # Audio snippet length in seconds
+        self.snippet_length = config.get('snippet_length', 10)  # Snippet length in seconds (audio and chart)
         self.image_difficulty = config.get('image_difficulty', 'easy')  # 'easy', 'medium', 'hard'
         
         # Store original config for replay (without song_pool which changes)
@@ -163,11 +163,26 @@ class GameSession:
 
 class QuizCog(commands.Cog):
     """Quiz game commands and functionality."""
-    
+
     def __init__(self, bot):
         self.bot = bot
         self.active_games: Dict[int, GameSession] = {}  # channel_id -> GameSession
         self.creating_games: set = set()  # Track channels currently creating games
+        self._chart_renderer = None  # Lazy-initialized ChartRenderer for chart mode
+
+    async def get_chart_renderer(self):
+        """Get or create the chart renderer (lazy initialization)."""
+        if self._chart_renderer is None:
+            from utils.chart_renderer import ChartRenderer
+            self._chart_renderer = ChartRenderer()
+            await self._chart_renderer.initialize()
+        return self._chart_renderer
+
+    async def cog_unload(self):
+        """Clean up when cog is unloaded."""
+        if self._chart_renderer:
+            await self._chart_renderer.close()
+            self._chart_renderer = None
     
     async def send_voice_message(self, channel: discord.TextChannel, file_path: str, duration_secs: float) -> bool:
         """Send an audio file as a Discord voice message using low-level API."""
@@ -304,7 +319,7 @@ class QuizCog(commands.Cog):
         answer_type="What to guess",
         rounds="Number of rounds to play (1-50)",
         time_limit="Seconds per round (10-300)",
-        snippet_length="Audio snippet length in seconds (5-30, only for audio mode)",
+        snippet_length="Snippet length in seconds (5-30, for audio and chart mode)",
         image_difficulty="Image visibility (easy=full, medium=25%, hard=10%)",
         categories="Comma-separated (e.g. 'POPS＆アニメ,東方Project') or leave empty for all",
         versions="Comma-separated (e.g. 'FESTiVAL,BUDDiES,PRiSM') or leave empty for all",
@@ -312,7 +327,8 @@ class QuizCog(commands.Cog):
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Image", value="image"),
-        app_commands.Choice(name="Audio", value="audio")
+        app_commands.Choice(name="Audio", value="audio"),
+        app_commands.Choice(name="Chart", value="chart"),
     ])
     @app_commands.choices(answer_type=[
         app_commands.Choice(name="Title", value="title"),
@@ -358,9 +374,9 @@ class QuizCog(commands.Cog):
         self.creating_games.add(channel_id)
         
         # Validate parameters
-        if mode not in ['image', 'audio']:
+        if mode not in ['image', 'audio', 'chart']:
             self.creating_games.discard(channel_id)
-            await interaction.response.send_message("❌ Mode must be 'image' or 'audio'", ephemeral=True)
+            await interaction.response.send_message("❌ Mode must be 'image', 'audio', or 'chart'", ephemeral=True)
             return
         
         if answer_type not in ['title', 'artist', 'difficulty']:
@@ -459,12 +475,14 @@ class QuizCog(commands.Cog):
             # Shuffle and select songs
             random.shuffle(songs)
             song_pool = songs[:rounds]
-            
+
             # Filter by available media files
             if mode == 'image':
                 song_pool = [s for s in song_pool if get_song_image_path(s)]
             elif mode == 'audio':
                 song_pool = [s for s in song_pool if get_song_audio_path(s)]
+            elif mode == 'chart':
+                song_pool = [s for s in song_pool if get_song_chart_path(s)]
             
             if not song_pool:
                 await interaction.channel.send(f"❌ No songs with {mode} files available!")
@@ -681,7 +699,35 @@ class QuizCog(commands.Cog):
                     await channel.send(file=file)
             else:
                 pass  # No audio file available
-        
+        elif game.mode == 'chart':
+            chart_path = get_song_chart_path(song)
+            if chart_path:
+                try:
+                    renderer = await self.get_chart_renderer()
+                    gif_path = await renderer.render_chart_gif(
+                        chart_path=chart_path,
+                        excerpt_duration=float(game.snippet_length),
+                    )
+                    if gif_path:
+                        file = discord.File(str(gif_path), filename="chart.gif")
+                        embed.set_image(url="attachment://chart.gif")
+                        await channel.send(embed=embed, file=file, view=skip_view)
+                        # Clean up temporary GIF
+                        try:
+                            gif_path.unlink()
+                        except Exception:
+                            pass
+                    else:
+                        await channel.send(
+                            content="(Chart rendering failed)",
+                            embed=embed, view=skip_view
+                        )
+                except Exception as e:
+                    print(f"Error rendering chart: {e}")
+                    await channel.send(embed=embed, view=skip_view)
+            else:
+                await channel.send(embed=embed, view=skip_view)
+
         # Start timeout timer
         game.timeout_task = asyncio.create_task(self.round_timeout(channel))
     
@@ -1080,6 +1126,8 @@ class QuizCog(commands.Cog):
                 song_pool = [s for s in song_pool if get_song_image_path(s)]
             elif mode == 'audio':
                 song_pool = [s for s in song_pool if get_song_audio_path(s)]
+            elif mode == 'chart':
+                song_pool = [s for s in song_pool if get_song_chart_path(s)]
             
             if not song_pool:
                 await channel.send(f"❌ No songs with {mode} files available!")
@@ -1183,14 +1231,14 @@ class QuizCog(commands.Cog):
             name="🎯 /quiz",
             value=(
                 "Start a new quiz game with customizable options:\n"
-                "• **mode**: `Image` (show cover) or `Audio` (play snippet)\n"
+                "• **mode**: `Image` (show cover), `Audio` (play snippet), or `Chart` (show chart pattern)\n"
                 "• **answer_type**: `Title`, `Artist`, or `Difficulty Level`\n"
                 "• **rounds**: Number of songs (1-50, default: 10)\n"
                 "• **time_limit**: Seconds per round (15-180, default: 60)\n"
                 "• **categories**: Filter by genre (comma-separated)\n"
                 "• **versions**: Filter by game version (comma-separated)\n"
                 "• **region**: Filter by region (`Any`, `Japan`, `International`, `USA`)\n"
-                "• **snippet_length**: Audio length in seconds (5-30, default: 10)\n\n"
+                "• **snippet_length**: Snippet/chart length in seconds (5-30, default: 10)\n\n"
                 "**Example**: `/quiz mode:Image answer_type:Title rounds:5 region:intl`"
             ),
             inline=False
@@ -1374,9 +1422,9 @@ class QuizCog(commands.Cog):
         self.creating_games.add(channel_id)
         
         # Validate parameters
-        if mode not in ['image', 'audio']:
+        if mode not in ['image', 'audio', 'chart']:
             self.creating_games.discard(channel_id)
-            await ctx.send("❌ Mode must be 'image' or 'audio'")
+            await ctx.send("❌ Mode must be 'image', 'audio', or 'chart'")
             return
         
         if answer_type not in ['title', 'artist', 'difficulty']:
@@ -1406,13 +1454,15 @@ class QuizCog(commands.Cog):
             
             random.shuffle(songs)
             song_pool = songs[:rounds]
-            
+
             # Filter by available media files
             if mode == 'image':
                 song_pool = [s for s in song_pool if get_song_image_path(s)]
             elif mode == 'audio':
                 song_pool = [s for s in song_pool if get_song_audio_path(s)]
-            
+            elif mode == 'chart':
+                song_pool = [s for s in song_pool if get_song_chart_path(s)]
+
             if not song_pool:
                 await ctx.send(f"❌ No songs with {mode} files available!")
                 self.creating_games.discard(channel_id)
@@ -1558,7 +1608,7 @@ class QuizCog(commands.Cog):
         
         embed.add_field(
             name="Game Modes",
-            value="• `image` - Guess from cover art\n• `audio` - Guess from music clip",
+            value="• `image` - Guess from cover art\n• `audio` - Guess from music clip\n• `chart` - Guess from chart pattern GIF",
             inline=True
         )
         

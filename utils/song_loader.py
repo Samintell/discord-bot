@@ -85,6 +85,43 @@ def get_song_audio_path(song: Dict) -> Optional[Path]:
     audio_path = PROJECT_ROOT / "audio" / audio_name
     return audio_path if audio_path.exists() else None
 
+def get_song_chart_path(song: Dict, difficulty: str = "master") -> Optional[Path]:
+    """Get the path to a song's processed simai chart file.
+
+    Args:
+        song: Song dictionary from output.json
+        difficulty: "master" or "remaster" (default: "master")
+
+    Returns:
+        Path to the chart .txt file, or None if not available
+    """
+    song_id = song.get('song_id')
+    if not song_id:
+        return None
+
+    # Chart files stored as: charts/{song_id}_{difficulty}.txt
+    # Sanitize filename the same way as download_charts.py
+    clean_id = song_id
+    invalid_chars = '<>:"/\\|?*'
+    for ch in invalid_chars:
+        clean_id = clean_id.replace(ch, '_')
+
+    chart_filename = f"{clean_id}_{difficulty}.txt"
+    chart_path = PROJECT_ROOT / "charts" / chart_filename
+
+    if chart_path.exists():
+        return chart_path
+
+    # Fallback: try remaster if master not found
+    if difficulty == "master":
+        remaster_filename = f"{clean_id}_remaster.txt"
+        remaster_path = PROJECT_ROOT / "charts" / remaster_filename
+        if remaster_path.exists():
+            return remaster_path
+
+    return None
+
+
 def get_available_categories() -> List[str]:
     """Get list of all available categories."""
     output_json = Path("output.json")
