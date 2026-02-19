@@ -19,13 +19,16 @@ from utils.config_manager import (
 )
 from utils.song_loader import _get_all_songs, clear_song_cache
 
-ADMIN_USER_ID = 185570606006272009
-
 
 def is_admin():
-    """Check decorator that restricts commands to the admin user."""
+    """Check decorator that restricts commands to the bot owner."""
     async def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.user.id != ADMIN_USER_ID:
+        app_info = await interaction.client.application_info()
+        if app_info.team:
+            owner_ids = {m.id for m in app_info.team.members}
+        else:
+            owner_ids = {app_info.owner.id}
+        if interaction.user.id not in owner_ids:
             raise app_commands.CheckFailure("You are not authorized to use this command.")
         return True
     return app_commands.check(predicate)
@@ -79,7 +82,7 @@ class AdminCog(commands.Cog):
     translation_group = app_commands.Group(
         name="translation",
         description="Manage English translations for song titles (admin only)",
-        default_permissions=discord.Permissions(administrator=True)
+        default_permissions=discord.Permissions()
     )
 
     @translation_group.command(name="add", description="Add or update an English translation")
@@ -149,7 +152,7 @@ class AdminCog(commands.Cog):
     romaji_group = app_commands.Group(
         name="romaji",
         description="Manage romaji overrides for song titles (admin only)",
-        default_permissions=discord.Permissions(administrator=True)
+        default_permissions=discord.Permissions()
     )
 
     @romaji_group.command(name="add", description="Add or update a romaji override")
@@ -218,7 +221,7 @@ class AdminCog(commands.Cog):
     alias_group = app_commands.Group(
         name="alias",
         description="Manage song aliases for quiz guessing (admin only)",
-        default_permissions=discord.Permissions(administrator=True)
+        default_permissions=discord.Permissions()
     )
 
     @alias_group.command(name="add", description="Add an alias for a song")
@@ -341,7 +344,7 @@ class AdminCog(commands.Cog):
     report_group = app_commands.Group(
         name="reports",
         description="View and clear user-submitted reports (admin only)",
-        default_permissions=discord.Permissions(administrator=True)
+        default_permissions=discord.Permissions()
     )
 
     @report_group.command(name="translations", description="View reported translation issues")
@@ -497,7 +500,7 @@ class AdminCog(commands.Cog):
     # ==================== REFRESH COMMAND ====================
 
     @app_commands.command(name="refresh", description="Run convert_data.py and reload song database (admin only)")
-    @app_commands.default_permissions(administrator=True)
+    @app_commands.default_permissions()
     @is_admin()
     async def refresh_data(self, interaction: discord.Interaction):
         """Run convert_data.py to re-download/regenerate output.json, then clear the song cache."""
