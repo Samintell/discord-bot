@@ -65,6 +65,11 @@ async def setup_hook():
         print("✅ Loaded quiz cog")
     except Exception as e:
         print(f"❌ Error loading quiz cog: {e}")
+    try:
+        await bot.load_extension('cogs.admin')
+        print("✅ Loaded admin cog")
+    except Exception as e:
+        print(f"❌ Error loading admin cog: {e}")
 
 # Assign setup hook
 bot.setup_hook = setup_hook

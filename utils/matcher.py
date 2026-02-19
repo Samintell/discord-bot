@@ -5,7 +5,7 @@ Handles both Japanese and romaji answers with partial matching.
 
 from difflib import SequenceMatcher
 import re
-from typing import Dict
+from typing import Dict, Optional, List
 
 def normalize_string(text: str) -> str:
     """
@@ -128,16 +128,17 @@ def check_difficulty(guess: str, song: Dict, exact_only: bool = False) -> bool:
     except (ValueError, TypeError):
         return False
 
-def check_answer(guess: str, song: Dict, answer_type: str = "title", threshold: float = 0.8) -> bool:
+def check_answer(guess: str, song: Dict, answer_type: str = "title", threshold: float = 0.8, aliases: Optional[List[str]] = None) -> bool:
     """
     Check if a guess matches the correct answer.
-    
+
     Args:
         guess: User's guess
         song: Song dictionary from output.json
         answer_type: "title", "artist", or "difficulty"
         threshold: Fuzzy matching threshold (0-1)
-    
+        aliases: Optional list of song aliases to also check (title mode only)
+
     Returns:
         True if the guess is correct
     """
@@ -146,22 +147,28 @@ def check_answer(guess: str, song: Dict, answer_type: str = "title", threshold: 
         japanese_title = song.get('title', '')
         romaji_title = song.get('romaji', '')
         english_title = song.get('english', '')
-        
+
         if fuzzy_match(guess, japanese_title, threshold):
             return True
         if romaji_title and fuzzy_match(guess, romaji_title, threshold):
             return True
         if english_title and fuzzy_match(guess, english_title, threshold):
             return True
-    
+
+        # Check aliases
+        if aliases:
+            for alias in aliases:
+                if fuzzy_match(guess, alias, threshold):
+                    return True
+
     elif answer_type == "artist":
         # Check against artist name
         artist = song.get('artist', '')
         if fuzzy_match(guess, artist, threshold):
             return True
-    
+
     elif answer_type == "difficulty":
         # Check difficulty level (exact match required)
         return check_difficulty(guess, song, exact_only=True)
-    
+
     return False

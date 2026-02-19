@@ -17,8 +17,9 @@ import sys
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path, get_song_chart_path
+from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path, get_song_chart_path, get_song_difficulties
 from utils.matcher import check_answer
+from utils.config_manager import get_aliases_for_song
 from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING, REGIONS, REGION_MAPPING
 
 
@@ -150,7 +151,8 @@ class GameSession:
         self.answered = False  # Track if someone answered this round
         self.round_ready = False  # True after media is sent and guesses are accepted
         self._next_gif_future: Optional[asyncio.Task] = None  # Pre-rendered chart GIF task
-        
+        self.current_aliases: List[str] = []  # Aliases for current song (title mode)
+
     def next_song(self) -> Optional[dict]:
         """Get the next song from the pool."""
         if not self.song_pool:
@@ -159,6 +161,9 @@ class GameSession:
         self.current_song = self.song_pool.pop(0)
         self.answered = False
         self.round_ready = False
+        # Load aliases for this song
+        song_id = self.current_song.get('song_id', '')
+        self.current_aliases = get_aliases_for_song(song_id) if song_id else []
         return self.current_song
     
     def add_score(self, user_id: int, display_name: str, points: int = 1):
@@ -199,7 +204,7 @@ class QuizCog(commands.Cog):
 
             # Peek at the next song without popping
             next_song = game.song_pool[0]
-            chart_path = get_song_chart_path(next_song)
+            chart_path = get_song_chart_path(next_song, difficulty=next_song.get('difficulty', 'master'))
             if not chart_path:
                 return None
 
@@ -303,10 +308,21 @@ class QuizCog(commands.Cog):
         return ' / '.join(parts)
     
     def get_difficulty_display(self, song: dict) -> str:
-        """Get difficulty level display string."""
+        """Get difficulty level display string showing both master and remaster if available."""
+        song_id = song.get('song_id', '')
+        if song_id:
+            difficulties = get_song_difficulties(song_id)
+            if difficulties:
+                parts = []
+                for diff_type in ('master', 'remaster'):
+                    if diff_type in difficulties:
+                        parts.append(f"Lv.{difficulties[diff_type]} ({diff_type})")
+                if parts:
+                    return ' | '.join(parts)
+        # Fallback to single difficulty from the song entry
         level = song.get('level', 0)
         difficulty_type = song.get('difficulty', 'master')
-        return f"Level {level} ({difficulty_type})"
+        return f"Lv.{level} ({difficulty_type})"
     
     def crop_image_for_difficulty(self, image_path: str, difficulty: str) -> io.BytesIO:
         """Crop image based on difficulty level.
@@ -489,8 +505,8 @@ class QuizCog(commands.Cog):
         
         try:
             # Load all master difficulty songs
-            all_songs = load_songs(difficulty="master")
-            
+            all_songs = load_songs(difficulty="master", deduplicate=(mode != 'chart'))
+
             # Filter by categories if specified
             if category_list:
                 all_songs = [s for s in all_songs if s.get('category') in category_list]
@@ -529,8 +545,8 @@ class QuizCog(commands.Cog):
             elif mode == 'audio':
                 song_pool = [s for s in song_pool if get_song_audio_path(s)]
             elif mode == 'chart':
-                song_pool = [s for s in song_pool if get_song_chart_path(s)]
-            
+                song_pool = [s for s in song_pool if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))]
+
             if not song_pool:
                 await interaction.channel.send(f"❌ No songs with {mode} files available!")
                 self.creating_games.discard(channel_id)
@@ -776,7 +792,7 @@ class QuizCog(commands.Cog):
 
             # If no pre-render available (round 1 or pre-render failed), render synchronously
             if gif_path is None:
-                chart_path = get_song_chart_path(song)
+                chart_path = get_song_chart_path(song, difficulty=song.get('difficulty', 'master'))
                 if chart_path:
                     try:
                         renderer = await self.get_chart_renderer()
@@ -901,7 +917,7 @@ class QuizCog(commands.Cog):
             return
         
         # Check answer
-        if check_answer(message.content, game.current_song, game.answer_type):
+        if check_answer(message.content, game.current_song, game.answer_type, aliases=game.current_aliases):
             game.answered = True
             
             # Cancel timeout
@@ -1179,8 +1195,9 @@ class QuizCog(commands.Cog):
         
         try:
             # Load all master difficulty songs
-            all_songs = load_songs(difficulty="master")
-            
+            mode = config['mode']
+            all_songs = load_songs(difficulty="master", deduplicate=(mode != 'chart'))
+
             if not all_songs:
                 await channel.send("❌ No songs found in database!")
                 self.creating_games.discard(channel.id)
@@ -1244,14 +1261,13 @@ class QuizCog(commands.Cog):
             song_pool = songs[:rounds]
             
             # Filter by available media files
-            mode = config['mode']
             if mode == 'image':
                 song_pool = [s for s in song_pool if get_song_image_path(s)]
             elif mode == 'audio':
                 song_pool = [s for s in song_pool if get_song_audio_path(s)]
             elif mode == 'chart':
-                song_pool = [s for s in song_pool if get_song_chart_path(s)]
-            
+                song_pool = [s for s in song_pool if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))]
+
             if not song_pool:
                 await channel.send(f"❌ No songs with {mode} files available!")
                 self.creating_games.discard(channel.id)
@@ -1577,7 +1593,7 @@ class QuizCog(commands.Cog):
         
         try:
             # Load songs
-            all_songs = load_songs(difficulty="master")
+            all_songs = load_songs(difficulty="master", deduplicate=(mode != 'chart'))
 
             # Filter by level range if specified
             if level_min is not None:
@@ -1604,7 +1620,7 @@ class QuizCog(commands.Cog):
             elif mode == 'audio':
                 song_pool = [s for s in song_pool if get_song_audio_path(s)]
             elif mode == 'chart':
-                song_pool = [s for s in song_pool if get_song_chart_path(s)]
+                song_pool = [s for s in song_pool if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))]
 
             if not song_pool:
                 await ctx.send(f"❌ No songs with {mode} files available!")
