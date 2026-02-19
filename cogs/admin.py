@@ -78,7 +78,8 @@ class AdminCog(commands.Cog):
 
     translation_group = app_commands.Group(
         name="translation",
-        description="Manage English translations for song titles (admin only)"
+        description="Manage English translations for song titles (admin only)",
+        default_permissions=discord.Permissions(administrator=True)
     )
 
     @translation_group.command(name="add", description="Add or update an English translation")
@@ -117,13 +118,13 @@ class AdminCog(commands.Cog):
             await interaction.response.send_message("No translations configured.", ephemeral=True)
             return
 
-        # Paginate to avoid message length limits
+        # Paginate to avoid message length limits (Discord max: 2000 chars)
         lines = [f"`{jp}` -> `{en}`" for jp, en in sorted(translations.items())]
         pages = []
         current_page = []
         current_len = 0
         for line in lines:
-            if current_len + len(line) + 1 > 3800:
+            if current_len + len(line) + 1 > 1800:
                 pages.append("\n".join(current_page))
                 current_page = []
                 current_len = 0
@@ -147,7 +148,8 @@ class AdminCog(commands.Cog):
 
     romaji_group = app_commands.Group(
         name="romaji",
-        description="Manage romaji overrides for song titles (admin only)"
+        description="Manage romaji overrides for song titles (admin only)",
+        default_permissions=discord.Permissions(administrator=True)
     )
 
     @romaji_group.command(name="add", description="Add or update a romaji override")
@@ -191,7 +193,7 @@ class AdminCog(commands.Cog):
         current_page = []
         current_len = 0
         for line in lines:
-            if current_len + len(line) + 1 > 3800:
+            if current_len + len(line) + 1 > 1800:
                 pages.append("\n".join(current_page))
                 current_page = []
                 current_len = 0
@@ -215,7 +217,8 @@ class AdminCog(commands.Cog):
 
     alias_group = app_commands.Group(
         name="alias",
-        description="Manage song aliases for quiz guessing (admin only)"
+        description="Manage song aliases for quiz guessing (admin only)",
+        default_permissions=discord.Permissions(administrator=True)
     )
 
     @alias_group.command(name="add", description="Add an alias for a song")
@@ -309,20 +312,36 @@ class AdminCog(commands.Cog):
                 alias_str = ", ".join(f"`{a}`" for a in aliases)
                 lines.append(f"**{display}:** {alias_str}")
 
-            text = "\n".join(lines)
-            if len(text) > 3900:
-                text = text[:3900] + "\n\n*...truncated*"
+            pages = []
+            current_page = []
+            current_len = 0
+            for line in lines:
+                if current_len + len(line) + 1 > 1800:
+                    pages.append("\n".join(current_page))
+                    current_page = []
+                    current_len = 0
+                current_page.append(line)
+                current_len += len(line) + 1
+            if current_page:
+                pages.append("\n".join(current_page))
 
+            header = f"**All Song Aliases ({len(all_aliases)} songs):**\n"
             await interaction.response.send_message(
-                f"**All Song Aliases ({len(all_aliases)} songs):**\n{text}",
+                header + pages[0] + (f"\n\n*Page 1/{len(pages)}*" if len(pages) > 1 else ""),
                 ephemeral=True
             )
+            for i, page in enumerate(pages[1:], 2):
+                await interaction.followup.send(
+                    page + f"\n\n*Page {i}/{len(pages)}*",
+                    ephemeral=True
+                )
 
     # ==================== REPORT COMMANDS ====================
 
     report_group = app_commands.Group(
         name="reports",
-        description="View and clear user-submitted reports (admin only)"
+        description="View and clear user-submitted reports (admin only)",
+        default_permissions=discord.Permissions(administrator=True)
     )
 
     @report_group.command(name="translations", description="View reported translation issues")
@@ -356,14 +375,29 @@ class AdminCog(commands.Cog):
             server = sub.get('server_name', '?')
             lines.append(f"**{i}.** `{title}` -> `{suggestion}`\n   By {user} in {server} ({timestamp})")
 
-        text = "\n".join(lines)
-        if len(text) > 3800:
-            text = text[:3800] + "\n\n*...truncated*"
+        pages = []
+        current_page = []
+        current_len = 0
+        for line in lines:
+            if current_len + len(line) + 1 > 1800:
+                pages.append("\n".join(current_page))
+                current_page = []
+                current_len = 0
+            current_page.append(line)
+            current_len += len(line) + 1
+        if current_page:
+            pages.append("\n".join(current_page))
 
+        header = f"**Translation Reports ({len(submissions)} total):**\n"
         await interaction.response.send_message(
-            f"**Translation Reports ({len(submissions)} total):**\n{text}",
+            header + pages[0] + (f"\n\n*Page 1/{len(pages)}*" if len(pages) > 1 else ""),
             ephemeral=True
         )
+        for i, page in enumerate(pages[1:], 2):
+            await interaction.followup.send(
+                page + f"\n\n*Page {i}/{len(pages)}*",
+                ephemeral=True
+            )
 
     @report_group.command(name="audio", description="View reported audio issues")
     @is_admin()
@@ -396,14 +430,29 @@ class AdminCog(commands.Cog):
             server = sub.get('server_name', '?')
             lines.append(f"**{i}.** `{title}`: {issue}\n   By {user} in {server} ({timestamp})")
 
-        text = "\n".join(lines)
-        if len(text) > 3800:
-            text = text[:3800] + "\n\n*...truncated*"
+        pages = []
+        current_page = []
+        current_len = 0
+        for line in lines:
+            if current_len + len(line) + 1 > 1800:
+                pages.append("\n".join(current_page))
+                current_page = []
+                current_len = 0
+            current_page.append(line)
+            current_len += len(line) + 1
+        if current_page:
+            pages.append("\n".join(current_page))
 
+        header = f"**Audio Reports ({len(submissions)} total):**\n"
         await interaction.response.send_message(
-            f"**Audio Reports ({len(submissions)} total):**\n{text}",
+            header + pages[0] + (f"\n\n*Page 1/{len(pages)}*" if len(pages) > 1 else ""),
             ephemeral=True
         )
+        for i, page in enumerate(pages[1:], 2):
+            await interaction.followup.send(
+                page + f"\n\n*Page {i}/{len(pages)}*",
+                ephemeral=True
+            )
 
     @report_group.command(name="clear", description="Clear all reports of a given type")
     @app_commands.describe(
@@ -448,6 +497,7 @@ class AdminCog(commands.Cog):
     # ==================== REFRESH COMMAND ====================
 
     @app_commands.command(name="refresh", description="Run convert_data.py and reload song database (admin only)")
+    @app_commands.default_permissions(administrator=True)
     @is_admin()
     async def refresh_data(self, interaction: discord.Interaction):
         """Run convert_data.py to re-download/regenerate output.json, then clear the song cache."""

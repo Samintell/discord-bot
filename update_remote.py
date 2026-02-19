@@ -1,7 +1,7 @@
 """
 Update script to sync audio files and config between local and remote server.
 
-Remote: root@159.65.167.59:/home/botuser/discord-bot
+Remote: botuser@159.65.167.59:/home/botuser/discord-bot
 
 Operations:
 1. Pull remote config files and merge with local (union of entries, local wins on conflict)
@@ -16,7 +16,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-REMOTE_HOST = "root@159.65.167.59"
+REMOTE_HOST = "botuser@159.65.167.59"
 REMOTE_DIR = "/home/botuser/discord-bot"
 PROJECT_ROOT = Path(__file__).parent
 
