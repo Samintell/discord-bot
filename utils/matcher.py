@@ -50,6 +50,14 @@ def fuzzy_match(guess: str, target: str, threshold: float = 0.8) -> bool:
     if not guess_norm or not target_norm:
         return False
     
+    # Exact match after normalization - always accept regardless of length
+    if guess_norm == target_norm:
+        return True
+    
+    # Also check raw case-insensitive match (preserves characters normalization strips)
+    if guess.strip().lower() == target.strip().lower():
+        return True
+    
     # Calculate minimum required length based on target length
     # Short titles (< 10 chars): require 40% of length
     # Medium titles (10-20 chars): require 35% of length  
