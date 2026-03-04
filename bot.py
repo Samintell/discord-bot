@@ -18,7 +18,7 @@ intents = discord.Intents.default()
 intents.message_content = True  # Required to read messages for guessing
 intents.messages = True
 
-bot = commands.Bot(command_prefix='q>', intents=intents)
+bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
 @bot.event
 async def on_ready():
@@ -40,23 +40,8 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
-    # Process commands first
+    # Process commands (needed for bot framework)
     await bot.process_commands(message)
-    # Note: Guess processing is handled in the quiz cog in this channel
-    # TODO: Process guess if game is active
-
-@bot.event
-async def on_command_error(ctx, error):
-    """Handle command errors."""
-    if isinstance(error, commands.CommandNotFound):
-        return  # Ignore unknown commands
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You don't have permission to use this command.")
-    elif isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏱️ This command is on cooldown. Try again in {error.retry_after:.1f}s")
-    else:
-        print(f'❌ Error: {error}')
-        await ctx.send(f"❌ An error occurred: {error}")
 
 async def setup_hook():
     """Setup hook to load cogs before bot starts."""
@@ -74,17 +59,18 @@ async def setup_hook():
 # Assign setup hook
 bot.setup_hook = setup_hook
 
-@bot.command(name="sync")
-@commands.is_owner()
-async def sync_commands(ctx):
+@bot.tree.command(name="sync", description="Force sync slash commands to this server (bot owner only)")
+async def sync_commands(interaction: discord.Interaction):
     """Force sync slash commands to this server (bot owner only)."""
+    if interaction.user.id != bot.owner_id:
+        await interaction.response.send_message("❌ Only the bot owner can use this command.", ephemeral=True)
+        return
     try:
-        # Sync to current guild for instant update
-        bot.tree.copy_global_to(guild=ctx.guild)
-        synced = await bot.tree.sync(guild=ctx.guild)
-        await ctx.send(f"✅ Synced {len(synced)} command(s) to this server!")
+        bot.tree.copy_global_to(guild=interaction.guild)
+        synced = await bot.tree.sync(guild=interaction.guild)
+        await interaction.response.send_message(f"✅ Synced {len(synced)} command(s) to this server!")
     except Exception as e:
-        await ctx.send(f"❌ Failed to sync: {e}")
+        await interaction.response.send_message(f"❌ Failed to sync: {e}")
 
 def main():
     """Main entry point."""
