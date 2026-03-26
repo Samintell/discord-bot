@@ -98,6 +98,9 @@ yt-dlp>=2023.0.0
 requests>=2.28.0
 playwright>=1.40.0
 imageio>=2.31.0
+aiosqlite>=0.19.0
+beautifulsoup4>=4.12.0
+cryptography>=41.0.0
 ```
 
 **External requirement**: `ffmpeg` and `ffprobe` must be installed for audio snippet creation
@@ -116,6 +119,9 @@ imageio>=2.31.0
   - `categories`: Comma-separated filter (e.g., "pops,touhou")
   - `versions`: Comma-separated filter (e.g., "festival,buddies")
   - `region`: Any, Japan, International, or USA
+  - `score_difficulty`: Filter by user's play data — Expert, Master (includes Re:MASTER), Expert+Master (requires `/login` + `/fetch`)
+  - `score_rank`: Minimum achievement rank — A, AA, AAA, S, S+, SS, SS+, SSS, SSS+
+  - `score_combo`: Minimum FC status — FC, FC+, AP, AP+
 - `/skip` - Skip current round (host only)
 - `/stop` - End game (host only)
 - `/leaderboard` - Show current scores
@@ -123,6 +129,10 @@ imageio>=2.31.0
 - `/help` - Show help information
 - `/report_translation` - Report incorrect English translation
 - `/report_audio` - Report audio issues
+- `/login` - Link maimai NET account (ephemeral, stores encrypted cookie)
+- `/logout` - Unlink maimai NET account and delete stored data
+- `/fetch` - Fetch/refresh scores from maimai NET (ephemeral)
+- `/mystats` - Show summary of cached maimai NET scores (ephemeral)
 
 #### Prefix Commands (`q>`)
 - `q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty]`
@@ -188,16 +198,22 @@ class GameSession:
 discord-bot/
 ├── bot.py                 # Main entry, Discord client setup, command prefix q>
 ├── cogs/
-│   └── quiz.py           # QuizCog with all game logic and commands
+│   ├── quiz.py           # QuizCog with all game logic and commands
+│   ├── admin.py          # AdminCog with owner-only management commands
+│   └── maimai_net.py     # MaimaiNetCog with /login, /logout, /fetch, /mystats
 ├── utils/
-│   ├── constants.py      # CATEGORIES, VERSIONS, and mapping dicts
+│   ├── constants.py      # CATEGORIES, VERSIONS, RANK_THRESHOLDS, FC_HIERARCHY, and mapping dicts
 │   ├── matcher.py        # check_answer(), fuzzy_match(), normalize_string()
 │   ├── song_loader.py    # load_songs(), get_song_image_path(), get_song_audio_path(), get_song_chart_path()
-│   └── chart_renderer.py # ChartRenderer class for GIF generation via Playwright
-├── .env                  # DISCORD_TOKEN=your_token_here
+│   ├── chart_renderer.py # ChartRenderer class for GIF generation via Playwright
+│   ├── config_manager.py # JSON config file management (translations, romaji, aliases)
+│   ├── database.py       # SQLite database for maimai NET tokens and cached scores
+│   └── maimai_scraper.py # maimai NET (intl) score scraper using BeautifulSoup
+├── .env                  # DISCORD_TOKEN and TOKEN_SECRET
 ├── .env.example          # Template for .env
 ├── requirements.txt      # Python dependencies
 ├── output.json           # Song database
+├── maimai_data.db        # SQLite database (auto-created, gitignored)
 ├── images/               # Cover art PNG files
 ├── audio/                # Full audio MP3 files
 │   └── snippets/         # Temporary audio snippets (auto-cleaned)
@@ -263,8 +279,14 @@ Both English (lowercase) and Japanese names are accepted for filtering via `CATE
 3. Install Playwright Chromium (required for chart mode): `playwright install chromium`
 4. Create Discord bot at https://discord.com/developers/applications
 5. Copy `.env.example` to `.env` and add your token: `DISCORD_TOKEN=your_token_here`
-6. Enable Message Content Intent in Discord Developer Portal
-7. Download chart data: `python download_charts.py`
+6. Generate a TOKEN_SECRET for encrypting maimai NET tokens:
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+   Add the output to `.env`: `TOKEN_SECRET=<generated_key>`
+7. Enable Message Content Intent in Discord Developer Portal
+8. Download chart data: `python download_charts.py`
+9. The SQLite database (`maimai_data.db`) is created automatically on first bot startup
 
 ### Running
 ```powershell
@@ -293,4 +315,53 @@ python bot.py
 
 ## Bot Token Security
 - **Never commit** `.env` or hardcoded tokens to git
-- `.gitignore` includes: `.env`, `*.pyc`, `__pycache__/`, `.vscode/`, `audio/snippets/`
+- `.gitignore` includes: `.env`, `*.pyc`, `__pycache__/`, `.vscode/`, `audio/snippets/`, `*.db`
+
+## maimai NET Integration
+
+### Overview
+Users can link their maimai NET (International) account to filter quiz songs based on their personal play history. Tokens are encrypted with Fernet and stored in SQLite. Scores are cached locally after fetching.
+
+### Architecture
+- **`utils/database.py`**: Async SQLite database using `aiosqlite`. Stores encrypted user tokens and cached score data. Initialized on bot startup via `init_db()`.
+- **`utils/maimai_scraper.py`**: Fetches and parses score pages from `maimaidx-eng.com`. Uses `aiohttp` for HTTP requests and `BeautifulSoup` for HTML parsing. Matches scraped song names to `output.json` entries by normalized title.
+- **`cogs/maimai_net.py`**: Discord commands for account linking (`/login`, `/logout`), score fetching (`/fetch`), and stats display (`/mystats`). All responses are ephemeral.
+
+### Database Schema (`maimai_data.db`)
+```sql
+user_tokens (discord_user_id TEXT PK, encrypted_token TEXT, created_at, updated_at)
+user_scores (discord_user_id TEXT, song_id TEXT, song_name TEXT, chart_type TEXT,
+             difficulty TEXT, level TEXT, achievement INT, dx_score INT, fc TEXT, fs TEXT,
+             fetched_at, PK(discord_user_id, song_id, chart_type, difficulty))
+```
+
+- `achievement` stored as integer * 10000 (e.g., 97.6977% = 976977)
+- `fc` values: `none`, `fc`, `fc+`, `ap`, `ap+`
+- `fs` values: `none`, `sync`, `fs`, `fs+`, `fdx`, `fdx+`
+
+### Score Filtering in Quiz
+When `/quiz` is used with `score_difficulty`, `score_rank`, and/or `score_combo`:
+1. Validates user has cached scores
+2. Queries SQLite for song_ids meeting the threshold on any of the specified difficulties
+3. Intersects with the normal song pool (after category/version/region/level filters)
+4. Multiple difficulties use OR logic (e.g., "expert+master" includes songs meeting threshold on either)
+5. Selecting "Master" implicitly includes remaster scores
+
+### Cookie Extraction Bookmarklet
+Users extract their `clal` cookie by creating a browser bookmark with this JavaScript URL:
+```
+javascript:void(function(){var c=document.cookie.split(';').find(c=>c.trim().startsWith('clal='));if(c){var v=c.trim().substring(5);navigator.clipboard.writeText(v).then(()=>alert('Cookie copied!')).catch(()=>{prompt('Copy this:',v)})}else{alert('No clal cookie found. Are you on maimai NET?')}}())
+```
+The bookmarklet reads `document.cookie` on the maimai NET page, finds the `clal` entry, and copies it to clipboard (with a prompt fallback for browsers that block clipboard access).
+
+### maimai NET Endpoints
+- Player data: `https://maimaidx-eng.com/maimai-mobile/playerData/`
+- Scores: `https://maimaidx-eng.com/maimai-mobile/record/musicGenre/search/?genre=99&diff={0-4}`
+- Auth: `Cookie: clal={token}` header
+
+### VPS Deployment Notes
+- SQLite database is auto-created on first bot startup (no manual DB setup needed)
+- Add `TOKEN_SECRET` to `.env` on the VPS (generate with: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`)
+- Install new dependencies: `pip install -r requirements.txt`
+- The `maimai_data.db` file persists across bot restarts; back up if needed
+- maimai NET cookies expire periodically; users will need to `/login` again when their cookie expires

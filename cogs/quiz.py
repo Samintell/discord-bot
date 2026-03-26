@@ -20,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path, get_song_chart_path, get_song_difficulties
 from utils.matcher import check_answer
 from utils.config_manager import get_aliases_for_song
-from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING, REGIONS, REGION_MAPPING
+from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING, REGIONS, REGION_MAPPING, RANK_THRESHOLDS, FC_HIERARCHY
+from utils.database import get_filtered_song_ids, has_scores
 
 
 class SkipButton(ui.View):
@@ -138,7 +139,11 @@ class GameSession:
             'versions': config.get('versions'),
             'region': config.get('region', 'any'),
             'level_min': config.get('level_min'),
-            'level_max': config.get('level_max')
+            'level_max': config.get('level_max'),
+            'score_difficulty': config.get('score_difficulty'),
+            'score_rank': config.get('score_rank'),
+            'score_combo': config.get('score_combo'),
+            'score_user_id': config.get('score_user_id'),
         }
         
         self.current_round = 0
@@ -378,7 +383,10 @@ class QuizCog(commands.Cog):
         versions="Comma-separated (e.g. 'FESTiVAL,BUDDiES,PRiSM') or leave empty for all",
         region="Filter by game region availability",
         level_min="Minimum chart level (e.g. 10)",
-        level_max="Maximum chart level (e.g. 13.9)"
+        level_max="Maximum chart level (e.g. 13.9)",
+        score_difficulty="Filter to songs you've played on this difficulty (requires /login + /fetch)",
+        score_rank="Minimum achievement rank on the selected difficulty",
+        score_combo="Minimum combo/FC status on the selected difficulty"
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Image", value="image"),
@@ -401,6 +409,28 @@ class QuizCog(commands.Cog):
         app_commands.Choice(name="International", value="intl"),
         app_commands.Choice(name="USA", value="usa")
     ])
+    @app_commands.choices(score_difficulty=[
+        app_commands.Choice(name="Expert", value="expert"),
+        app_commands.Choice(name="Master", value="master"),
+        app_commands.Choice(name="Expert + Master", value="expert+master"),
+    ])
+    @app_commands.choices(score_rank=[
+        app_commands.Choice(name="A (80%+)", value="A"),
+        app_commands.Choice(name="AA (90%+)", value="AA"),
+        app_commands.Choice(name="AAA (94%+)", value="AAA"),
+        app_commands.Choice(name="S (97%+)", value="S"),
+        app_commands.Choice(name="S+ (98%+)", value="S+"),
+        app_commands.Choice(name="SS (99%+)", value="SS"),
+        app_commands.Choice(name="SS+ (99.5%+)", value="SS+"),
+        app_commands.Choice(name="SSS (100%+)", value="SSS"),
+        app_commands.Choice(name="SSS+ (100.5%+)", value="SSS+"),
+    ])
+    @app_commands.choices(score_combo=[
+        app_commands.Choice(name="FC (Full Combo)", value="FC"),
+        app_commands.Choice(name="FC+ (Full Combo+)", value="FC+"),
+        app_commands.Choice(name="AP (All Perfect)", value="AP"),
+        app_commands.Choice(name="AP+ (All Perfect+)", value="AP+"),
+    ])
     async def quiz_start(
         self,
         interaction: discord.Interaction,
@@ -414,7 +444,10 @@ class QuizCog(commands.Cog):
         versions: Optional[str] = None,
         region: str = "usa",
         level_min: Optional[float] = None,
-        level_max: Optional[float] = None
+        level_max: Optional[float] = None,
+        score_difficulty: Optional[str] = None,
+        score_rank: Optional[str] = None,
+        score_combo: Optional[str] = None
     ):
         """Start a new quiz game."""
         channel_id = interaction.channel_id
@@ -453,8 +486,57 @@ class QuizCog(commands.Cog):
         
         if snippet_length < 5 or snippet_length > 30:
             self.creating_games.discard(channel_id)
-            await interaction.response.send_message("❌ Snippet length must be between 5 and 30 seconds", ephemeral=True)
+            await interaction.response.send_message("Snippet length must be between 5 and 30 seconds", ephemeral=True)
             return
+
+        # Validate score filter parameters
+        score_user_id = None
+        score_song_ids = None
+        if score_difficulty:
+            if not score_rank and not score_combo:
+                self.creating_games.discard(channel_id)
+                await interaction.response.send_message(
+                    "When using score_difficulty, you must also specify score_rank and/or score_combo.",
+                    ephemeral=True,
+                )
+                return
+
+            score_user_id = str(interaction.user.id)
+            user_has_scores = await has_scores(score_user_id)
+            if not user_has_scores:
+                self.creating_games.discard(channel_id)
+                await interaction.response.send_message(
+                    "No cached scores found. Use `/login` to link your maimai NET account, then `/fetch` to download your scores.",
+                    ephemeral=True,
+                )
+                return
+
+            # Parse difficulty list
+            if "+" in score_difficulty:
+                difficulties = [d.strip() for d in score_difficulty.split("+")]
+            else:
+                difficulties = [score_difficulty]
+
+            # "master" implicitly includes "remaster"
+            if "master" in difficulties and "remaster" not in difficulties:
+                difficulties.append("remaster")
+
+            score_song_ids = await get_filtered_song_ids(
+                score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
+            )
+
+            if not score_song_ids:
+                filter_desc = f"{score_difficulty}"
+                if score_rank:
+                    filter_desc += f" {score_rank}+"
+                if score_combo:
+                    filter_desc += f" {score_combo}+"
+                self.creating_games.discard(channel_id)
+                await interaction.response.send_message(
+                    f"No songs found matching your score filter ({filter_desc}). Try a lower threshold or run `/fetch` to update your scores.",
+                    ephemeral=True,
+                )
+                return
         
         # Respond immediately to avoid timeout
         try:
@@ -525,6 +607,10 @@ class QuizCog(commands.Cog):
             if level_max is not None:
                 all_songs = [s for s in all_songs if s.get('level', 0) <= level_max]
 
+            # Filter by user's score data if specified
+            if score_song_ids is not None:
+                all_songs = [s for s in all_songs if s.get('song_id') in score_song_ids]
+
             songs = all_songs
             
             if not songs:
@@ -568,7 +654,11 @@ class QuizCog(commands.Cog):
                 'versions': versions,  # Store original input for replay
                 'region': region,  # Store region for replay
                 'level_min': level_min,
-                'level_max': level_max
+                'level_max': level_max,
+                'score_difficulty': score_difficulty,
+                'score_rank': score_rank,
+                'score_combo': score_combo,
+                'score_user_id': score_user_id,
             }
             
             game = GameSession(channel_id, interaction.user.id, config)
@@ -592,9 +682,18 @@ class QuizCog(commands.Cog):
                 max_str = str(level_max) if level_max is not None else "any"
                 level_text = f"\n**Level Range:** {min_str} - {max_str}"
 
+            score_text = ""
+            if score_difficulty:
+                parts = [score_difficulty.replace("+", " + ").capitalize()]
+                if score_rank:
+                    parts.append(f"{score_rank}+")
+                if score_combo:
+                    parts.append(f"{score_combo}+")
+                score_text = f"\n**Score Filter:** {' '.join(parts)}"
+
             embed = discord.Embed(
                 title="🎵 MaiMai Song Quiz Started!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}{region_text}{level_text}",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {answer_type.title()}\n**Rounds:** {rounds}\n**Time per round:** {time_limit}s{difficulty_text}{region_text}{level_text}{score_text}",
                 color=discord.Color.blue()
             )
             
@@ -1245,6 +1344,24 @@ class QuizCog(commands.Cog):
             if level_max is not None:
                 all_songs = [s for s in all_songs if s.get('level', 0) <= level_max]
 
+            # Apply score filter if it was used
+            replay_score_difficulty = config.get('score_difficulty')
+            replay_score_user_id = config.get('score_user_id')
+            if replay_score_difficulty and replay_score_user_id:
+                if "+" in replay_score_difficulty:
+                    difficulties = [d.strip() for d in replay_score_difficulty.split("+")]
+                else:
+                    difficulties = [replay_score_difficulty]
+                # "master" implicitly includes "remaster"
+                if "master" in difficulties and "remaster" not in difficulties:
+                    difficulties.append("remaster")
+                score_song_ids = await get_filtered_song_ids(
+                    replay_score_user_id, difficulties,
+                    min_rank=config.get('score_rank'),
+                    min_combo=config.get('score_combo'),
+                )
+                all_songs = [s for s in all_songs if s.get('song_id') in score_song_ids]
+
             songs = all_songs
             
             if not songs:
@@ -1303,9 +1420,18 @@ class QuizCog(commands.Cog):
                 max_str = str(level_max) if level_max is not None else "any"
                 level_text = f"\n**Level Range:** {min_str} - {max_str}"
 
+            score_text = ""
+            if replay_score_difficulty:
+                parts = [replay_score_difficulty.replace("+", " + ").capitalize()]
+                if config.get('score_rank'):
+                    parts.append(f"{config['score_rank']}+")
+                if config.get('score_combo'):
+                    parts.append(f"{config['score_combo']}+")
+                score_text = f"\n**Score Filter:** {' '.join(parts)}"
+
             embed = discord.Embed(
                 title="🔁 Quiz Restarting!",
-                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}{region_text}{level_text}",
+                description=f"**Mode:** {mode.title()}\n**Guess:** {config['answer_type'].title()}\n**Rounds:** {rounds}\n**Time per round:** {config['time_limit']}s{difficulty_text}{region_text}{level_text}{score_text}",
                 color=discord.Color.green()
             )
             
@@ -1412,7 +1538,25 @@ class QuizCog(commands.Cog):
             name="📋 Information",
             value=(
                 "• `/filters` - Show available categories and versions\n"
+                "• `/mystats` - Show your cached maimai NET score summary\n"
                 "• `/help` - Show this help message"
+            ),
+            inline=False
+        )
+
+        # maimai NET commands
+        embed.add_field(
+            name="🌐 maimai NET Integration",
+            value=(
+                "Link your maimai NET account to filter quiz songs by your scores:\n"
+                "• `/loginhelp` - How to get your login cookie\n"
+                "• `/login` - Link your account\n"
+                "• `/fetch` - Download your scores\n"
+                "• `/logout` - Unlink account and delete data\n\n"
+                "**Score filters**: `/quiz score_difficulty:Master score_rank:S`\n"
+                "• **score_difficulty**: Expert, Master, Expert+Master\n"
+                "• **score_rank**: A, AA, AAA, S, S+, SS, SS+, SSS, SSS+\n"
+                "• **score_combo**: FC, FC+, AP, AP+"
             ),
             inline=False
         )

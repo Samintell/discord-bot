@@ -8,10 +8,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import quote
+
+import requests
 
 # Fix Windows console encoding for Japanese characters
 if sys.platform == "win32":
@@ -259,6 +263,68 @@ def match_chart_to_song(
     return best_match
 
 
+def fetch_chart_from_mainotes(title: str, difficulty: str) -> Optional[str]:
+    """
+    Fetch chart data from mai-notes.com API.
+
+    Args:
+        title: Song title to search for
+        difficulty: "master" or "remaster"
+
+    Returns:
+        Simai chart string if found, None otherwise
+    """
+    # mai-notes.com search API
+    search_url = f"https://mai-notes.com/api/maimai/charts?title={quote(title)}"
+
+    try:
+        resp = requests.get(search_url, timeout=10)
+        if resp.status_code != 200:
+            return None
+
+        data = resp.json()
+        if not data or not isinstance(data, list):
+            return None
+
+        # Find matching chart
+        diff_key = "5" if difficulty == "master" else "6"
+        for chart in data:
+            chart_title = chart.get("title", "")
+            if normalize_title(chart_title) == normalize_title(title):
+                # Fetch the full chart data
+                chart_id = chart.get("id")
+                if not chart_id:
+                    continue
+
+                detail_url = f"https://mai-notes.com/api/maimai/chart/{chart_id}"
+                detail_resp = requests.get(detail_url, timeout=10)
+                if detail_resp.status_code != 200:
+                    continue
+
+                chart_data = detail_resp.json()
+                inote = chart_data.get(f"inote_{diff_key}")
+                if inote:
+                    # Build simai string
+                    lines = []
+                    if chart_data.get("title"):
+                        lines.append(f"&title={chart_data['title']}")
+                    if chart_data.get("artist"):
+                        lines.append(f"&artist={chart_data['artist']}")
+                    if chart_data.get("wholebpm"):
+                        lines.append(f"&wholebpm={chart_data['wholebpm']}")
+                    if chart_data.get("first"):
+                        lines.append(f"&first={chart_data['first']}")
+                    lv = chart_data.get(f"lv_{diff_key}")
+                    if lv:
+                        lines.append(f"&lv_{diff_key}={lv}")
+                    lines.append(f"&inote_{diff_key}={inote}")
+                    return "\n".join(lines)
+
+        return None
+    except Exception:
+        return None
+
+
 def process_all_charts():
     """Process all charts from the cloned repo and save to charts/ folder."""
     # Load songs from output.json
@@ -385,6 +451,74 @@ def process_all_charts():
         with open(UNMATCHED_FILE, "w", encoding="utf-8") as f:
             json.dump(unmatched, f, indent=2, ensure_ascii=False)
 
+    # Fallback: fetch missing charts from mai-notes.com
+    print(f"\nChecking for missing charts to fetch from mai-notes.com...")
+    songs_without_charts = []
+    for song in all_songs:
+        sid = song.get("song_id", "")
+        if sid and sid not in chart_index:
+            songs_without_charts.append(song)
+
+    mainotes_fetched = 0
+    if songs_without_charts:
+        print(f"Found {len(songs_without_charts)} songs without charts, attempting mai-notes.com fallback...")
+        for i, song in enumerate(songs_without_charts):
+            sid = song.get("song_id", "")
+            title = song.get("title", "")
+            if not title:
+                continue
+
+            # Rate limit to avoid hammering the API
+            if i > 0 and i % 10 == 0:
+                print(f"  Progress: {i}/{len(songs_without_charts)}...")
+                time.sleep(1)
+
+            # Try to fetch master chart
+            master_simai = fetch_chart_from_mainotes(title, "master")
+            if master_simai:
+                filename = sanitize_filename(f"{sid}_master.txt")
+                chart_path = CHARTS_DIR / filename
+                chart_path.write_text(master_simai, encoding="utf-8")
+
+                if sid not in chart_index:
+                    chart_index[sid] = {
+                        "song_id": sid,
+                        "master": filename,
+                        "remaster": None,
+                        "bpm": "",
+                    }
+                else:
+                    chart_index[sid]["master"] = filename
+                mainotes_fetched += 1
+                stats["charts_saved"] += 1
+
+            # Try to fetch remaster chart
+            remaster_simai = fetch_chart_from_mainotes(title, "remaster")
+            if remaster_simai:
+                filename = sanitize_filename(f"{sid}_remaster.txt")
+                chart_path = CHARTS_DIR / filename
+                chart_path.write_text(remaster_simai, encoding="utf-8")
+
+                if sid not in chart_index:
+                    chart_index[sid] = {
+                        "song_id": sid,
+                        "master": None,
+                        "remaster": filename,
+                        "bpm": "",
+                    }
+                else:
+                    chart_index[sid]["remaster"] = filename
+                if not master_simai:  # Only count if we didn't already count for master
+                    mainotes_fetched += 1
+                stats["charts_saved"] += 1
+
+            # Small delay between songs
+            time.sleep(0.2)
+
+    # Re-save chart index with mai-notes.com additions
+    with open(CHART_INDEX_FILE, "w", encoding="utf-8") as f:
+        json.dump(chart_index, f, indent=2, ensure_ascii=False)
+
     # Print summary
     print(f"\n{'='*50}")
     print(f"Chart Processing Summary")
@@ -392,6 +526,7 @@ def process_all_charts():
     print(f"Total song folders processed: {stats['total_folders']}")
     print(f"Matched to output.json:       {stats['matched']}")
     print(f"Unmatched:                    {stats['unmatched']}")
+    print(f"Fetched from mai-notes.com:   {mainotes_fetched}")
     print(f"Chart files saved:            {stats['charts_saved']}")
     print(f"Songs with charts:            {len(chart_index)}")
     print(f"\nChart index saved to: {CHART_INDEX_FILE}")

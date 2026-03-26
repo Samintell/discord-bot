@@ -68,3 +68,31 @@ REGION_MAPPING = {v.lower(): v for v in REGIONS.values()}
 # Also add display names in the mapping (lowercase -> internal key)
 for display_name, key in REGIONS.items():
     REGION_MAPPING[display_name.lower()] = key
+
+# Achievement rank thresholds (rank -> minimum achievement * 10000)
+RANK_THRESHOLDS = {
+    "A": 800000,
+    "AA": 900000,
+    "AAA": 940000,
+    "S": 970000,
+    "S+": 980000,
+    "SS": 990000,
+    "SS+": 995000,
+    "SSS": 1000000,
+    "SSS+": 1005000,
+}
+
+# FC hierarchy for comparison (higher index = better)
+FC_HIERARCHY = ["none", "fc", "fc+", "ap", "ap+"]
+
+# Difficulty index mapping for maimai NET URLs
+SCORE_DIFFICULTY_INDICES = {
+    "basic": 0,
+    "advanced": 1,
+    "expert": 2,
+    "master": 3,
+    "remaster": 4,
+}
+
+# Difficulty names indexed by maimai NET difficulty number
+SCORE_DIFFICULTY_NAMES = ["basic", "advanced", "expert", "master", "remaster"]

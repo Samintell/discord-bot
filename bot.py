@@ -44,17 +44,30 @@ async def on_message(message):
     await bot.process_commands(message)
 
 async def setup_hook():
-    """Setup hook to load cogs before bot starts."""
+    """Setup hook to load cogs and initialize database before bot starts."""
+    # Initialize the SQLite database for maimai NET data
+    try:
+        from utils.database import init_db
+        await init_db()
+        print("Initialized maimai database")
+    except Exception as e:
+        print(f"Warning: Failed to initialize maimai database: {e}")
+
     try:
         await bot.load_extension('cogs.quiz')
-        print("✅ Loaded quiz cog")
+        print("Loaded quiz cog")
     except Exception as e:
-        print(f"❌ Error loading quiz cog: {e}")
+        print(f"Error loading quiz cog: {e}")
     try:
         await bot.load_extension('cogs.admin')
-        print("✅ Loaded admin cog")
+        print("Loaded admin cog")
     except Exception as e:
-        print(f"❌ Error loading admin cog: {e}")
+        print(f"Error loading admin cog: {e}")
+    try:
+        await bot.load_extension('cogs.maimai_net')
+        print("Loaded maimai_net cog")
+    except Exception as e:
+        print(f"Error loading maimai_net cog: {e}")
 
 # Assign setup hook
 bot.setup_hook = setup_hook

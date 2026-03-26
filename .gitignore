@@ -158,3 +158,4 @@ new_songs/
 _maichart_repo/
 charts/
 tmpclaude*
+*.db
