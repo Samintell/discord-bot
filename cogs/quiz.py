@@ -74,7 +74,7 @@ class SkipButton(ui.View):
 
 class PlayAgainButton(ui.View):
     """View with a play again button for game end."""
-    
+
     def __init__(self, cog, channel: discord.TextChannel, host_id: int, game_config: dict, timeout: float = 60):
         super().__init__(timeout=timeout)
         self.cog = cog
@@ -82,7 +82,8 @@ class PlayAgainButton(ui.View):
         self.host_id = host_id
         self.game_config = game_config
         self.clicked = False
-    
+        self.message: Optional[discord.Message] = None
+
     @ui.button(label="Play Again", style=discord.ButtonStyle.primary, emoji="🔁")
     async def play_again_button(self, interaction: discord.Interaction, button: ui.Button):
         """Handle play again button press."""
@@ -90,29 +91,39 @@ class PlayAgainButton(ui.View):
         if interaction.user.id != self.host_id:
             await interaction.response.send_message("❌ Only the original host can restart the game!", ephemeral=True)
             return
-        
+
         # Check if a game is already running
         if self.channel.id in self.cog.active_games or self.channel.id in self.cog.creating_games:
             await interaction.response.send_message("❌ A game is already active in this channel!", ephemeral=True)
             return
-        
+
         if self.clicked:
             await interaction.response.send_message("❌ Already starting a new game!", ephemeral=True)
             return
-        
+
         self.clicked = True
         button.disabled = True
-        
-        # Acknowledge the interaction
-        await interaction.response.send_message("🔁 Starting new game with same settings...", ephemeral=True)
-        
+
+        # Update the message to show disabled button
+        try:
+            await interaction.response.edit_message(view=self)
+        except Exception:
+            pass
+
         # Start new game with same config
         await self.cog.start_game_with_config(self.channel, interaction.user.id, self.game_config)
-    
+
     async def on_timeout(self):
-        """Disable buttons on timeout."""
+        """Disable buttons on timeout and update the message."""
         for item in self.children:
             item.disabled = True
+
+        # Try to edit the message to show disabled state
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
 
 class GameSession:
     """Represents an active quiz game session."""
@@ -1275,8 +1286,9 @@ class QuizCog(commands.Cog):
                 game_config=game.original_config,
                 timeout=60
             )
-            
-            await channel.send(embed=embed, view=play_again_view)
+
+            msg = await channel.send(embed=embed, view=play_again_view)
+            play_again_view.message = msg
         except Exception as e:
             print(f"Error in end_game: {e}")
         finally:
