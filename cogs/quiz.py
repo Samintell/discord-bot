@@ -87,31 +87,66 @@ class PlayAgainButton(ui.View):
     @ui.button(label="Play Again", style=discord.ButtonStyle.primary, emoji="🔁")
     async def play_again_button(self, interaction: discord.Interaction, button: ui.Button):
         """Handle play again button press."""
-        # Only host can restart
-        if interaction.user.id != self.host_id:
-            await interaction.response.send_message("❌ Only the original host can restart the game!", ephemeral=True)
-            return
+        async def _send_ephemeral(msg: str):
+            # Try response first, then followup.
+            if not interaction.response.is_done():
+                try:
+                    await interaction.response.send_message(msg, ephemeral=True)
+                    return True
+                except Exception:
+                    pass
 
-        # Check if a game is already running
-        if self.channel.id in self.cog.active_games or self.channel.id in self.cog.creating_games:
-            await interaction.response.send_message("❌ A game is already active in this channel!", ephemeral=True)
-            return
+            try:
+                await interaction.followup.send(msg, ephemeral=True)
+                return True
+            except Exception:
+                return False
 
-        if self.clicked:
-            await interaction.response.send_message("❌ Already starting a new game!", ephemeral=True)
-            return
-
-        self.clicked = True
-        button.disabled = True
-
-        # Update the message to show disabled button
         try:
-            await interaction.response.edit_message(view=self)
+            # Only host can restart
+            if interaction.user.id != self.host_id:
+                await _send_ephemeral("❌ Only the original host can restart the game!")
+                return
+
+            # Check if a game is already running
+            if self.channel.id in self.cog.active_games or self.channel.id in self.cog.creating_games:
+                await _send_ephemeral("❌ A game is already active in this channel!")
+                return
+
+            if self.clicked:
+                await _send_ephemeral("❌ Already starting a new game!")
+                return
+
+            self.clicked = True
+            button.disabled = True
+
+            # Acknowledge immediately, then do the heavier replay setup in background.
+            sent = await _send_ephemeral("🔁 Starting new game with same settings...")
+            if not sent:
+                return
+
+            # Update the original message to show disabled button
+            try:
+                if self.message:
+                    await self.message.edit(view=self)
+            except Exception:
+                pass
+
+            asyncio.create_task(
+                self.cog.start_game_with_config(self.channel, interaction.user.id, self.game_config)
+            )
+        except Exception:
+            await _send_ephemeral("❌ Failed to restart game. Check bot logs for details.")
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: ui.Item):
+        """Log unexpected view errors so button failures are visible in bot logs."""
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ Interaction failed. Check bot logs for details.", ephemeral=True)
+            else:
+                await interaction.response.send_message("❌ Interaction failed. Check bot logs for details.", ephemeral=True)
         except Exception:
             pass
-
-        # Start new game with same config
-        await self.cog.start_game_with_config(self.channel, interaction.user.id, self.game_config)
 
     async def on_timeout(self):
         """Disable buttons on timeout and update the message."""
@@ -1242,8 +1277,10 @@ class QuizCog(commands.Cog):
             return
         
         # Cancel any pending timeout
-        if game.timeout_task:
+        current_task = asyncio.current_task()
+        if game.timeout_task and game.timeout_task is not current_task and not game.timeout_task.done():
             game.timeout_task.cancel()
+        game.timeout_task = None
 
         # Cancel any pending chart pre-render and clean up its file
         if game._next_gif_future is not None:
