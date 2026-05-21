@@ -66,6 +66,11 @@ async def setup_hook():
         print("Loaded maimai_net cog")
     except Exception as e:
         print(f"Error loading maimai_net cog: {e}")
+    try:
+        await bot.load_extension('cogs.profile')
+        print("Loaded profile cog")
+    except Exception as e:
+        print(f"Error loading profile cog: {e}")
 
     bot.loop.create_task(watch_admin_signals(_handle_admin_signal))
 

@@ -2,6 +2,9 @@
 Constants for the MaiMai quiz bot, including available categories and versions.
 """
 
+DEFAULT_SNIPPET_LENGTH = 10
+DEFAULT_IMAGE_DIFFICULTY = "easy"
+
 # Available categories in MaiMai (Japanese: English)
 CATEGORIES = {
     "POPS＆アニメ": "pops",

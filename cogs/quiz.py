@@ -20,8 +20,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path, get_song_chart_path, get_song_difficulties
 from utils.matcher import check_answer
 from utils.config_manager import get_aliases_for_song
-from utils.constants import CATEGORIES, VERSIONS, CATEGORY_MAPPING, VERSION_MAPPING, REGIONS, REGION_MAPPING, RANK_THRESHOLDS, FC_HIERARCHY
-from utils.database import get_filtered_song_ids, has_scores
+from utils.constants import (
+    CATEGORIES,
+    VERSIONS,
+    CATEGORY_MAPPING,
+    VERSION_MAPPING,
+    REGIONS,
+    REGION_MAPPING,
+    RANK_THRESHOLDS,
+    FC_HIERARCHY,
+    DEFAULT_SNIPPET_LENGTH,
+    DEFAULT_IMAGE_DIFFICULTY,
+)
+from utils.database import get_filtered_song_ids, has_scores, record_quiz_rewards
+from utils.profile_rewards import calculate_reward_breakdown, calculate_coin_reward
 
 
 class SkipButton(ui.View):
@@ -170,8 +182,9 @@ class GameSession:
         self.answer_type = config.get('answer_type', 'title')  # 'title' or 'artist'
         self.time_limit = config.get('time_limit', 60)
         self.total_rounds = config.get('rounds', 10)
-        self.snippet_length = config.get('snippet_length', 10)  # Snippet length in seconds (audio and chart)
-        self.image_difficulty = config.get('image_difficulty', 'easy')  # 'easy', 'medium', 'hard'
+        self.snippet_length = config.get('snippet_length', DEFAULT_SNIPPET_LENGTH)  # Snippet length in seconds (audio and chart)
+        self.image_difficulty = config.get('image_difficulty', DEFAULT_IMAGE_DIFFICULTY)  # 'easy', 'medium', 'hard'
+        self.eligible_song_count = config.get('eligible_song_count', 0)
         
         # Store original config for replay (without song_pool which changes)
         self.original_config = {
@@ -203,6 +216,7 @@ class GameSession:
         self.round_ready = False  # True after media is sent and guesses are accepted
         self._next_gif_future: Optional[asyncio.Task] = None  # Pre-rendered chart GIF task
         self.current_aliases: List[str] = []  # Aliases for current song (title mode)
+        self.rewards_awarded = False
 
     def next_song(self) -> Optional[dict]:
         """Get the next song from the pool."""
@@ -484,8 +498,8 @@ class QuizCog(commands.Cog):
         answer_type: str = "title",
         rounds: int = 10,
         time_limit: int = 20,
-        snippet_length: int = 10,
-        image_difficulty: str = "easy",
+        snippet_length: int = DEFAULT_SNIPPET_LENGTH,
+        image_difficulty: str = DEFAULT_IMAGE_DIFFICULTY,
         categories: Optional[str] = None,
         versions: Optional[str] = None,
         region: str = "usa",
@@ -664,28 +678,29 @@ class QuizCog(commands.Cog):
                 self.creating_games.discard(channel_id)
                 return
             
-            if len(songs) < rounds:
-                rounds = len(songs)
-            
-            # Shuffle and select songs
-            random.shuffle(songs)
-            song_pool = songs[:rounds]
-
-            # Filter by available media files
+            # Filter by available media files before selecting songs
             if mode == 'image':
-                song_pool = [s for s in song_pool if get_song_image_path(s)]
+                eligible_songs = [s for s in songs if get_song_image_path(s)]
             elif mode == 'audio':
-                song_pool = [s for s in song_pool if get_song_audio_path(s)]
-            elif mode == 'chart':
-                song_pool = [s for s in song_pool if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))]
+                eligible_songs = [s for s in songs if get_song_audio_path(s)]
+            else:  # chart
+                eligible_songs = [
+                    s for s in songs
+                    if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))
+                ]
 
-            if not song_pool:
+            if not eligible_songs:
                 await interaction.channel.send(f"❌ No songs with {mode} files available!")
                 self.creating_games.discard(channel_id)
                 return
+
+            eligible_song_count = len(eligible_songs)
+            if eligible_song_count < rounds:
+                rounds = eligible_song_count
             
-            if len(song_pool) < rounds:
-                rounds = len(song_pool)
+            # Shuffle and select songs
+            random.shuffle(eligible_songs)
+            song_pool = eligible_songs[:rounds]
             
             # Create game session
             config = {
@@ -696,6 +711,7 @@ class QuizCog(commands.Cog):
                 'snippet_length': snippet_length,
                 'image_difficulty': image_difficulty,
                 'song_pool': song_pool,
+                'eligible_song_count': eligible_song_count,
                 'categories': categories,  # Store original input for replay
                 'versions': versions,  # Store original input for replay
                 'region': region,  # Store region for replay
@@ -1266,6 +1282,31 @@ class QuizCog(commands.Cog):
         except discord.errors.NotFound:
             await interaction.channel.send("🛑 Stopping game...")
         await self.end_game(interaction.channel, cancelled=True)
+
+    async def _award_profile_rewards(self, game: GameSession) -> Optional[dict]:
+        if game.rewards_awarded or not game.scores:
+            return None
+
+        breakdown = calculate_reward_breakdown(
+            mode=game.mode,
+            snippet_length=game.snippet_length,
+            image_difficulty=game.image_difficulty,
+            rounds=game.total_rounds,
+            eligible_song_count=game.eligible_song_count,
+        )
+        total_multiplier = breakdown["total_multiplier"]
+
+        rewards = {}
+        for user_id, correct in game.scores.items():
+            coins = calculate_coin_reward(correct, total_multiplier)
+            try:
+                await record_quiz_rewards(str(user_id), correct, 1, coins)
+                rewards[user_id] = coins
+            except Exception as reward_error:
+                print(f"Failed to save rewards for {user_id}: {reward_error}")
+
+        game.rewards_awarded = True
+        return {"rewards": rewards, "breakdown": breakdown}
     
     async def end_game(self, channel: discord.TextChannel, cancelled: bool = False):
         """End the game and show final results."""
@@ -1294,6 +1335,12 @@ class QuizCog(commands.Cog):
             game._next_gif_future = None
         
         try:
+            reward_summary = None
+            try:
+                reward_summary = await self._award_profile_rewards(game)
+            except Exception as reward_error:
+                print(f"Error awarding profile rewards: {reward_error}")
+
             # Create final results embed
             embed = discord.Embed(
                 title="🏁 Game Over!" if not cancelled else "🛑 Game Stopped",
@@ -1326,6 +1373,31 @@ class QuizCog(commands.Cog):
 
             msg = await channel.send(embed=embed, view=play_again_view)
             play_again_view.message = msg
+
+            if reward_summary and reward_summary.get("rewards"):
+                rewards = reward_summary["rewards"]
+                breakdown = reward_summary["breakdown"]
+                total_multiplier = breakdown.get("total_multiplier", 1.0)
+                reward_lines = []
+                for user_id, coins in sorted(rewards.items(), key=lambda x: x[1], reverse=True):
+                    display_name = game.display_names.get(user_id, f"<@{user_id}>")
+                    reward_lines.append(f"{display_name}: +{coins}")
+
+                extra_count = 0
+                if len(reward_lines) > 10:
+                    extra_count = len(reward_lines) - 10
+                    reward_lines = reward_lines[:10]
+
+                if extra_count:
+                    reward_lines.append(f"...and {extra_count} more")
+
+                reward_embed = discord.Embed(
+                    title="💰 Maimiles Awarded",
+                    description=f"Multiplier: x{total_multiplier:.2f}",
+                    color=discord.Color.green(),
+                )
+                reward_embed.add_field(name="Rewards", value="\n".join(reward_lines), inline=False)
+                await channel.send(embed=reward_embed)
         except Exception as e:
             print(f"Error in end_game: {e}")
         finally:
@@ -1419,33 +1491,36 @@ class QuizCog(commands.Cog):
                 return
             
             rounds = config['rounds']
-            if len(songs) < rounds:
-                rounds = len(songs)
-            
-            # Shuffle and select songs
-            random.shuffle(songs)
-            song_pool = songs[:rounds]
-            
-            # Filter by available media files
-            if mode == 'image':
-                song_pool = [s for s in song_pool if get_song_image_path(s)]
-            elif mode == 'audio':
-                song_pool = [s for s in song_pool if get_song_audio_path(s)]
-            elif mode == 'chart':
-                song_pool = [s for s in song_pool if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))]
 
-            if not song_pool:
+            # Filter by available media files before selecting songs
+            if mode == 'image':
+                eligible_songs = [s for s in songs if get_song_image_path(s)]
+            elif mode == 'audio':
+                eligible_songs = [s for s in songs if get_song_audio_path(s)]
+            else:  # chart
+                eligible_songs = [
+                    s for s in songs
+                    if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))
+                ]
+
+            if not eligible_songs:
                 await channel.send(f"❌ No songs with {mode} files available!")
                 self.creating_games.discard(channel.id)
                 return
+
+            eligible_song_count = len(eligible_songs)
+            if eligible_song_count < rounds:
+                rounds = eligible_song_count
             
-            if len(song_pool) < rounds:
-                rounds = len(song_pool)
+            # Shuffle and select songs
+            random.shuffle(eligible_songs)
+            song_pool = eligible_songs[:rounds]
             
             # Update config with new song pool
             new_config = config.copy()
             new_config['rounds'] = rounds
             new_config['song_pool'] = song_pool
+            new_config['eligible_song_count'] = eligible_song_count
             
             # Create new game session
             game = GameSession(channel.id, host_id, new_config)
@@ -1587,6 +1662,8 @@ class QuizCog(commands.Cog):
             name="📋 Information",
             value=(
                 "• `/filters` - Show available categories and versions\n"
+                "• `/profile` - Show your quiz profile\n"
+                "• `/shop` - Browse profile cosmetics\n"
                 "• `/mystats` - Show your cached maimai NET score summary\n"
                 "• `/help` - Show this help message"
             ),

@@ -56,6 +56,29 @@ async def init_db() -> None:
                 PRIMARY KEY (discord_user_id, song_id, chart_type, difficulty)
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                discord_user_id TEXT NOT NULL,
+                total_correct INTEGER NOT NULL DEFAULT 0,
+                total_games INTEGER NOT NULL DEFAULT 0,
+                coins_balance INTEGER NOT NULL DEFAULT 0,
+                coins_lifetime INTEGER NOT NULL DEFAULT 0,
+                banner_id TEXT,
+                partner_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (discord_user_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_inventory (
+                discord_user_id TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                item_type TEXT NOT NULL,
+                purchased_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (discord_user_id, item_id)
+            )
+        """)
         await db.commit()
 
 
@@ -251,3 +274,171 @@ async def get_score_summary(discord_user_id: str) -> Optional[Dict]:
             "by_difficulty": difficulty_counts,
             "rank_counts": rank_counts,
         }
+
+
+async def _ensure_profile(db: aiosqlite.Connection, discord_user_id: str) -> None:
+    await db.execute(
+        "INSERT OR IGNORE INTO user_profiles (discord_user_id) VALUES (?)",
+        (discord_user_id,)
+    )
+
+
+async def get_profile(discord_user_id: str) -> Dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        cursor = await db.execute(
+            """
+            SELECT total_correct, total_games, coins_balance, coins_lifetime, banner_id, partner_id
+            FROM user_profiles WHERE discord_user_id = ?
+            """,
+            (discord_user_id,)
+        )
+        row = await cursor.fetchone()
+        await db.commit()
+
+        if not row:
+            return {
+                "total_correct": 0,
+                "total_games": 0,
+                "coins_balance": 0,
+                "coins_lifetime": 0,
+                "banner_id": None,
+                "partner_id": None,
+            }
+
+        return {
+            "total_correct": row[0],
+            "total_games": row[1],
+            "coins_balance": row[2],
+            "coins_lifetime": row[3],
+            "banner_id": row[4],
+            "partner_id": row[5],
+        }
+
+
+async def record_quiz_rewards(
+    discord_user_id: str,
+    correct_delta: int,
+    games_delta: int,
+    coins_delta: int,
+) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET total_correct = total_correct + ?,
+                total_games = total_games + ?,
+                coins_balance = coins_balance + ?,
+                coins_lifetime = coins_lifetime + ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (correct_delta, games_delta, coins_delta, coins_delta, discord_user_id),
+        )
+        await db.commit()
+
+
+async def spend_coins(discord_user_id: str, amount: int) -> bool:
+    if amount <= 0:
+        return True
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        cursor = await db.execute(
+            "SELECT coins_balance FROM user_profiles WHERE discord_user_id = ?",
+            (discord_user_id,)
+        )
+        row = await cursor.fetchone()
+        balance = row[0] if row else 0
+        if balance < amount:
+            return False
+
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET coins_balance = coins_balance - ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (amount, discord_user_id),
+        )
+        await db.commit()
+        return True
+
+
+async def add_inventory_item(discord_user_id: str, item_id: str, item_type: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        await db.execute(
+            """
+            INSERT OR IGNORE INTO user_inventory (discord_user_id, item_id, item_type)
+            VALUES (?, ?, ?)
+            """,
+            (discord_user_id, item_id, item_type),
+        )
+        await db.commit()
+
+
+async def has_inventory_item(discord_user_id: str, item_id: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT 1 FROM user_inventory
+            WHERE discord_user_id = ? AND item_id = ?
+            LIMIT 1
+            """,
+            (discord_user_id, item_id),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def list_inventory_items(discord_user_id: str, item_type: Optional[str] = None) -> List[str]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if item_type:
+            cursor = await db.execute(
+                """
+                SELECT item_id FROM user_inventory
+                WHERE discord_user_id = ? AND item_type = ?
+                ORDER BY item_id
+                """,
+                (discord_user_id, item_type),
+            )
+        else:
+            cursor = await db.execute(
+                """
+                SELECT item_id FROM user_inventory
+                WHERE discord_user_id = ?
+                ORDER BY item_id
+                """,
+                (discord_user_id,),
+            )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+
+async def set_profile_banner(discord_user_id: str, banner_id: Optional[str]) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET banner_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (banner_id, discord_user_id),
+        )
+        await db.commit()
+
+
+async def set_profile_partner(discord_user_id: str, partner_id: Optional[str]) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET partner_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (partner_id, discord_user_id),
+        )
+        await db.commit()
