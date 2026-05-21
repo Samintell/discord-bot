@@ -28,6 +28,10 @@ playwright install chromium
    ```
    DISCORD_TOKEN=your_bot_token_here
    ```
+   If you want a separate admin bot, add a second token:
+   ```
+   ADMIN_DISCORD_TOKEN=your_admin_bot_token_here
+   ```
 2. Enable **Message Content Intent** in the Discord Developer Portal under your bot's settings.
 
 ### Data Setup
@@ -51,6 +55,12 @@ Song cover images go in `images/`, audio files in `audio/`, and chart files in `
 
 ```bash
 python bot.py
+```
+
+For the optional admin bot:
+
+```bash
+python admin_bot.py
 ```
 
 Commands sync automatically on startup. Use `q>sync` (bot owner only) to force-sync to the current server.
@@ -80,7 +90,9 @@ Commands sync automatically on startup. Use `q>sync` (bot owner only) to force-s
 | `q>lb` | Show leaderboard |
 | `q>qhelp` | Show help |
 
-### Admin Commands (restricted)
+### Admin Bot Commands (restricted)
+
+These commands are hosted by the admin bot and will apply changes to the main bot.
 
 | Command | Description |
 |---------|-------------|
@@ -138,3 +150,9 @@ discord-bot/
 ├── charts/                 # Simai chart files
 └── new_songs/              # Staging area for new audio uploads
 ```
+
+## Credits
+
+- [Neskol](https://github.com/Neskol) for [Maichart-Converts](https://github.com/Neskol/Maichart-Converts): Charts
+- [Non](https://x.com/non_otoge) and [Takerun](https://x.com/takerun_1224) for [mai-notes](https://mai-notes.com/): Chart Player
+- [shedanial](https://github.com/shedaniel) for [tomomai](https://github.com/shedaniel/tomomai/tree/main): login flow

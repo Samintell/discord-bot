@@ -159,3 +159,4 @@ _maichart_repo/
 charts/
 tmpclaude*
 *.db
+config/admin_signals.jsonl

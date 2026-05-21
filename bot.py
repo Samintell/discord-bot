@@ -9,6 +9,9 @@ import os
 import asyncio
 from dotenv import load_dotenv
 
+from utils.admin_signals import watch_admin_signals
+from utils.song_loader import clear_song_cache
+
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -59,18 +62,21 @@ async def setup_hook():
     except Exception as e:
         print(f"Error loading quiz cog: {e}")
     try:
-        await bot.load_extension('cogs.admin')
-        print("Loaded admin cog")
-    except Exception as e:
-        print(f"Error loading admin cog: {e}")
-    try:
         await bot.load_extension('cogs.maimai_net')
         print("Loaded maimai_net cog")
     except Exception as e:
         print(f"Error loading maimai_net cog: {e}")
 
+    bot.loop.create_task(watch_admin_signals(_handle_admin_signal))
+
 # Assign setup hook
 bot.setup_hook = setup_hook
+
+async def _handle_admin_signal(signal: dict) -> None:
+    action = signal.get("action")
+    if action == "reload_songs":
+        clear_song_cache()
+        print("Admin signal: reloaded song cache")
 
 @bot.tree.command(name="sync", description="Force sync slash commands to this server (bot owner only)")
 async def sync_commands(interaction: discord.Interaction):

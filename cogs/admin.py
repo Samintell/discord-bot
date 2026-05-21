@@ -17,6 +17,7 @@ from utils.config_manager import (
     load_romaji_overrides, add_romaji_override, remove_romaji_override,
     load_aliases, add_alias, remove_alias,
 )
+from utils.admin_signals import emit_admin_signal
 from utils.song_loader import _get_all_songs, clear_song_cache
 
 
@@ -524,6 +525,11 @@ class AdminCog(commands.Cog):
             if process.returncode == 0:
                 # Clear the cached song data so the next quiz loads fresh data
                 clear_song_cache()
+
+                try:
+                    emit_admin_signal("reload_songs")
+                except Exception as signal_error:
+                    print(f"Warning: Failed to emit admin signal: {signal_error}")
 
                 # Truncate output for Discord message limits
                 summary = output_text[-1500:] if len(output_text) > 1500 else output_text
