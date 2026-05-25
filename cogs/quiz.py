@@ -185,6 +185,7 @@ class GameSession:
         self.snippet_length = config.get('snippet_length', DEFAULT_SNIPPET_LENGTH)  # Snippet length in seconds (audio and chart)
         self.image_difficulty = config.get('image_difficulty', DEFAULT_IMAGE_DIFFICULTY)  # 'easy', 'medium', 'hard'
         self.eligible_song_count = config.get('eligible_song_count', 0)
+        self.total_selectable_songs = config.get('total_selectable_songs', 0)
         
         # Store original config for replay (without song_pool which changes)
         self.original_config = {
@@ -649,6 +650,17 @@ class QuizCog(commands.Cog):
             # Load all master difficulty songs
             all_songs = load_songs(difficulty="master", deduplicate=(mode != 'chart'))
 
+            # Total selectable songs for pool scaling (no filters)
+            if mode == 'image':
+                total_selectable_songs = len([s for s in all_songs if get_song_image_path(s)])
+            elif mode == 'audio':
+                total_selectable_songs = len([s for s in all_songs if get_song_audio_path(s)])
+            else:  # chart
+                total_selectable_songs = len([
+                    s for s in all_songs
+                    if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))
+                ])
+
             # Filter by categories if specified
             if category_list:
                 all_songs = [s for s in all_songs if s.get('category') in category_list]
@@ -712,6 +724,7 @@ class QuizCog(commands.Cog):
                 'image_difficulty': image_difficulty,
                 'song_pool': song_pool,
                 'eligible_song_count': eligible_song_count,
+                'total_selectable_songs': total_selectable_songs,
                 'categories': categories,  # Store original input for replay
                 'versions': versions,  # Store original input for replay
                 'region': region,  # Store region for replay
@@ -748,9 +761,9 @@ class QuizCog(commands.Cog):
             if score_difficulty:
                 parts = [score_difficulty.replace("+", " + ").capitalize()]
                 if score_rank:
-                    parts.append(f"{score_rank}+")
+                    parts.append(f"{score_rank}")
                 if score_combo:
-                    parts.append(f"{score_combo}+")
+                    parts.append(f"{score_combo}")
                 score_text = f"\n**Score Filter:** {' '.join(parts)}"
 
             embed = discord.Embed(
@@ -1289,10 +1302,11 @@ class QuizCog(commands.Cog):
 
         breakdown = calculate_reward_breakdown(
             mode=game.mode,
+            answer_type=game.answer_type,
             snippet_length=game.snippet_length,
             image_difficulty=game.image_difficulty,
-            rounds=game.total_rounds,
             eligible_song_count=game.eligible_song_count,
+            total_song_count=game.total_selectable_songs,
         )
         total_multiplier = breakdown["total_multiplier"]
 
@@ -1418,6 +1432,17 @@ class QuizCog(commands.Cog):
             mode = config['mode']
             all_songs = load_songs(difficulty="master", deduplicate=(mode != 'chart'))
 
+            # Total selectable songs for pool scaling (no filters)
+            if mode == 'image':
+                total_selectable_songs = len([s for s in all_songs if get_song_image_path(s)])
+            elif mode == 'audio':
+                total_selectable_songs = len([s for s in all_songs if get_song_audio_path(s)])
+            else:  # chart
+                total_selectable_songs = len([
+                    s for s in all_songs
+                    if get_song_chart_path(s, difficulty=s.get('difficulty', 'master'))
+                ])
+
             if not all_songs:
                 await channel.send("❌ No songs found in database!")
                 self.creating_games.discard(channel.id)
@@ -1521,6 +1546,7 @@ class QuizCog(commands.Cog):
             new_config['rounds'] = rounds
             new_config['song_pool'] = song_pool
             new_config['eligible_song_count'] = eligible_song_count
+            new_config['total_selectable_songs'] = total_selectable_songs
             
             # Create new game session
             game = GameSession(channel.id, host_id, new_config)

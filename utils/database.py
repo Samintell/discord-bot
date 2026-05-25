@@ -442,3 +442,29 @@ async def set_profile_partner(discord_user_id: str, partner_id: Optional[str]) -
             (partner_id, discord_user_id),
         )
         await db.commit()
+
+
+async def set_profile_coins_balance(discord_user_id: str, balance: int) -> None:
+    if balance < 0:
+        balance = 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        cursor = await db.execute(
+            "SELECT coins_lifetime FROM user_profiles WHERE discord_user_id = ?",
+            (discord_user_id,),
+        )
+        row = await cursor.fetchone()
+        lifetime = row[0] if row else 0
+        new_lifetime = max(lifetime, balance)
+
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET coins_balance = ?,
+                coins_lifetime = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (balance, new_lifetime, discord_user_id),
+        )
+        await db.commit()

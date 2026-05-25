@@ -7,6 +7,7 @@ Operations:
 1. Pull remote config files and merge with local (union of entries, local wins on conflict)
 2. Push merged config files back to remote
 3. Copy audio files from new_songs/ to remote audio/ directory
+4. Sync assets/ folder to remote (creates remote folder if missing)
 """
 
 import json
@@ -18,7 +19,7 @@ from pathlib import Path
 
 REMOTE_HOST = "botuser@159.65.167.59"
 REMOTE_DIR = "/home/botuser/discord-bot"
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def run_cmd(cmd, check=True):
@@ -51,6 +52,11 @@ def scp_push_dir(local_dir, remote_dir):
     if file_args:
         run_cmd(["scp"] + file_args + [f"{REMOTE_HOST}:{remote_dir}/"])
     return len(file_args)
+
+
+def ensure_remote_dir(remote_dir):
+    """Ensure a directory exists on the remote host."""
+    run_cmd(["ssh", REMOTE_HOST, "mkdir", "-p", remote_dir])
 
 
 def load_json(path):
@@ -171,6 +177,24 @@ def push_new_audio():
     print(f"  Uploaded {len(audio_files)} file(s) to remote audio/.")
 
 
+def push_assets():
+    """Sync assets/ folder to remote."""
+    local_assets = PROJECT_ROOT / "assets"
+    if not local_assets.exists():
+        print("\n  assets/ directory does not exist, skipping.")
+        return
+
+    has_files = any(p.is_file() for p in local_assets.rglob("*"))
+    if not has_files:
+        print("\n  assets/ directory is empty, skipping.")
+        return
+
+    remote_assets = f"{REMOTE_DIR}/assets"
+    ensure_remote_dir(remote_assets)
+    run_cmd(["scp", "-r", str(local_assets), f"{REMOTE_HOST}:{REMOTE_DIR}/"])
+    print("  Synced assets/ to remote.")
+
+
 def main():
     print("=" * 60)
     print("MaiMai Quiz Bot - Remote Update Script")
@@ -178,7 +202,7 @@ def main():
     print("=" * 60)
 
     # Step 1: Sync configs (pull, merge, push)
-    print("\n[1/2] Syncing config files...")
+    print("\n[1/3] Syncing config files...")
     try:
         sync_configs()
     except Exception as e:
@@ -186,11 +210,18 @@ def main():
         print("  Continuing with audio upload...")
 
     # Step 2: Push new audio files
-    print("\n[2/2] Uploading new audio files...")
+    print("\n[2/3] Uploading new audio files...")
     try:
         push_new_audio()
     except Exception as e:
         print(f"\n  ERROR uploading audio: {e}")
+
+    # Step 3: Sync assets folder
+    print("\n[3/3] Syncing assets folder...")
+    try:
+        push_assets()
+    except Exception as e:
+        print(f"\n  ERROR syncing assets: {e}")
 
     print("\n" + "=" * 60)
     print("Update complete.")

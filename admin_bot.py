@@ -32,6 +32,20 @@ async def on_ready():
         print(f"Failed to sync commands: {e}")
 
 
+@bot.tree.command(name="sync", description="Force sync slash commands to this server (bot owner only)")
+async def sync_commands(interaction: discord.Interaction):
+    """Force sync slash commands to this server (bot owner only)."""
+    if interaction.user.id != bot.owner_id:
+        await interaction.response.send_message("❌ Only the bot owner can use this command.", ephemeral=True)
+        return
+    try:
+        bot.tree.copy_global_to(guild=interaction.guild)
+        synced = await bot.tree.sync(guild=interaction.guild)
+        await interaction.response.send_message(f"✅ Synced {len(synced)} command(s) to this server!")
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Failed to sync: {e}")
+
+
 async def setup_hook():
     """Setup hook to load admin cog before bot starts."""
     try:

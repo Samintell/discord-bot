@@ -19,6 +19,7 @@ from utils.config_manager import (
 )
 from utils.admin_signals import emit_admin_signal
 from utils.song_loader import _get_all_songs, clear_song_cache
+from utils.database import set_profile_coins_balance
 
 
 def is_admin():
@@ -342,6 +343,29 @@ class AdminCog(commands.Cog):
 
     # ==================== REPORT COMMANDS ====================
 
+    coins_group = app_commands.Group(
+        name="coins",
+        description="Manage profile currency (admin only)",
+        default_permissions=discord.Permissions()
+    )
+
+    @coins_group.command(name="set", description="Set a user's maimiles balance")
+    @app_commands.describe(
+        user="User to update",
+        amount="New maimiles balance"
+    )
+    @is_admin()
+    async def coins_set(self, interaction: discord.Interaction, user: discord.User, amount: int):
+        if amount < 0:
+            await interaction.response.send_message("Amount must be 0 or higher.", ephemeral=True)
+            return
+
+        await set_profile_coins_balance(str(user.id), amount)
+        await interaction.response.send_message(
+            f"Set maimiles for {user.mention} to {amount}.",
+            ephemeral=True
+        )
+
     report_group = app_commands.Group(
         name="reports",
         description="View and clear user-submitted reports (admin only)",
@@ -500,11 +524,11 @@ class AdminCog(commands.Cog):
 
     # ==================== REFRESH COMMAND ====================
 
-    @app_commands.command(name="refresh", description="Run convert_data.py and reload song database (admin only)")
+    @app_commands.command(name="refresh", description="Run scripts/convert_data.py and reload song database (admin only)")
     @app_commands.default_permissions()
     @is_admin()
     async def refresh_data(self, interaction: discord.Interaction):
-        """Run convert_data.py to re-download/regenerate output.json, then clear the song cache."""
+        """Run scripts/convert_data.py to re-download/regenerate output.json, then clear the song cache."""
         import asyncio
 
         await interaction.response.defer(ephemeral=True)
@@ -512,7 +536,7 @@ class AdminCog(commands.Cog):
         try:
             project_root = Path(__file__).parent.parent
             process = await asyncio.create_subprocess_exec(
-                sys.executable, str(project_root / "convert_data.py"),
+                sys.executable, str(project_root / "scripts" / "convert_data.py"),
                 cwd=str(project_root),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -540,17 +564,17 @@ class AdminCog(commands.Cog):
             else:
                 err_summary = error_text[-1000:] if len(error_text) > 1000 else error_text
                 await interaction.followup.send(
-                    f"**convert_data.py failed (exit code {process.returncode}):**\n```\n{err_summary}\n```",
+                    f"**scripts/convert_data.py failed (exit code {process.returncode}):**\n```\n{err_summary}\n```",
                     ephemeral=True,
                 )
         except asyncio.TimeoutError:
             await interaction.followup.send(
-                "**convert_data.py timed out after 120 seconds.**",
+                "**scripts/convert_data.py timed out after 120 seconds.**",
                 ephemeral=True,
             )
         except Exception as e:
             await interaction.followup.send(
-                f"**Error running convert_data.py:** {e}",
+                f"**Error running scripts/convert_data.py:** {e}",
                 ephemeral=True,
             )
 

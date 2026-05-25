@@ -38,15 +38,15 @@ playwright install chromium
 
 1. Download/generate the song database:
    ```bash
-   python convert_data.py
+   python scripts/convert_data.py
    ```
 2. Download audio files:
    ```bash
-   python download_audio.py
+   python scripts/download_audio.py
    ```
 3. Download chart data (optional, for chart mode):
    ```bash
-   python download_charts.py
+   python scripts/download_charts.py
    ```
 
 Song cover images go in `images/`, audio files in `audio/`, and chart files in `charts/`.
@@ -100,7 +100,7 @@ These commands are hosted by the admin bot and will apply changes to the main bo
 | `/romaji add\|remove\|list` | Manage romaji overrides |
 | `/alias add\|remove\|list` | Manage song aliases |
 | `/reports translations\|audio\|clear` | View/clear user reports |
-| `/refresh` | Re-run `convert_data.py` and reload song data |
+| `/refresh` | Re-run `scripts/convert_data.py` and reload song data |
 
 ## Game Modes
 
@@ -140,10 +140,14 @@ discord-bot/
 │   ├── known_translations.json
 │   ├── romaji_overrides.json
 │   └── aliases.json
-├── convert_data.py         # Download and generate output.json
-├── download_audio.py       # Download audio files via yt-dlp
-├── download_charts.py      # Download chart data
-├── update_remote.py        # Sync files to remote server via SCP
+├── scripts/
+│   ├── convert_data.py         # Download and generate output.json
+│   ├── download_audio.py       # Download audio files via yt-dlp
+│   ├── download_charts.py      # Download chart data
+│   ├── manual_audio_download.py  # Manual audio download helper
+│   ├── replace_audio.py        # Audio replacement utility
+│   ├── scrape_sekaipedia.py    # Sekaipedia translation scraper
+│   └── update_remote.py        # Sync files to remote server via SCP
 ├── output.json             # Song database (generated)
 ├── images/                 # Cover art PNGs
 ├── audio/                  # Audio MP3 files

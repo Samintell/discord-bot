@@ -15,6 +15,12 @@ MODE_MULTIPLIERS = {
     "chart": 10.0,
 }
 
+ANSWER_TYPE_MULTIPLIERS = {
+    "difficulty": 0.2,
+    "artist": 0.8,
+    "title": 1.0,
+}
+
 IMAGE_DIFFICULTY_MULTIPLIERS = {
     "easy": 1.0,
     "medium": 2.0,
@@ -32,35 +38,38 @@ def calculate_length_multiplier(mode: str, snippet_length: float, image_difficul
     return 1.0
 
 
-def calculate_pool_multiplier(rounds: int, eligible_song_count: int) -> float:
-    if rounds <= MIN_POOL_SIZE or eligible_song_count <= MIN_POOL_SIZE:
+def calculate_pool_multiplier(eligible_song_count: int, total_song_count: int) -> float:
+    if eligible_song_count <= MIN_POOL_SIZE or total_song_count <= MIN_POOL_SIZE:
         return 1.0
 
-    max_pool = max(eligible_song_count, MIN_POOL_SIZE)
-    rounds_clamped = min(rounds, max_pool)
+    total_clamped = max(total_song_count, MIN_POOL_SIZE)
+    eligible_clamped = min(max(eligible_song_count, MIN_POOL_SIZE), total_clamped)
 
-    if max_pool == MIN_POOL_SIZE:
+    if total_clamped == MIN_POOL_SIZE:
         return 1.0
 
-    ratio = math.log(rounds_clamped / MIN_POOL_SIZE) / math.log(max_pool / MIN_POOL_SIZE)
+    ratio = math.log(eligible_clamped / MIN_POOL_SIZE) / math.log(total_clamped / MIN_POOL_SIZE)
     multiplier = 1.0 + (MAX_POOL_MULTIPLIER - 1.0) * ratio
     return min(MAX_POOL_MULTIPLIER, max(1.0, multiplier))
 
 
 def calculate_reward_breakdown(
     mode: str,
+    answer_type: str,
     snippet_length: float,
     image_difficulty: str,
-    rounds: int,
     eligible_song_count: int,
+    total_song_count: int,
 ) -> Dict[str, float]:
     mode_multiplier = MODE_MULTIPLIERS.get(mode, 1.0)
+    answer_multiplier = ANSWER_TYPE_MULTIPLIERS.get(answer_type, 1.0)
     length_multiplier = calculate_length_multiplier(mode, snippet_length, image_difficulty)
-    pool_multiplier = calculate_pool_multiplier(rounds, eligible_song_count)
-    total_multiplier = mode_multiplier * length_multiplier * pool_multiplier
+    pool_multiplier = calculate_pool_multiplier(eligible_song_count, total_song_count)
+    total_multiplier = mode_multiplier * answer_multiplier * length_multiplier * pool_multiplier
 
     return {
         "mode_multiplier": mode_multiplier,
+        "answer_multiplier": answer_multiplier,
         "length_multiplier": length_multiplier,
         "pool_multiplier": pool_multiplier,
         "total_multiplier": total_multiplier,

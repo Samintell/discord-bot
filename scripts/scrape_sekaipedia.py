@@ -9,9 +9,9 @@ Uses the MediaWiki API to:
 4. Output a JSON file mapping Japanese title -> {romaji, english}
 
 Usage:
-    python scrape_sekaipedia.py
-    python scrape_sekaipedia.py --output sekaipedia_translations.json
-    python scrape_sekaipedia.py --delay 0.5
+    python scripts/scrape_sekaipedia.py
+    python scripts/scrape_sekaipedia.py --output sekaipedia_translations.json
+    python scripts/scrape_sekaipedia.py --delay 0.5
 """
 
 import argparse
@@ -19,7 +19,10 @@ import json
 import re
 import sys
 import time
+from pathlib import Path
 import requests
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 API_URL = "https://www.sekaipedia.org/w/api.php"
 DEFAULT_OUTPUT = "sekaipedia_translations.json"
@@ -213,10 +216,14 @@ def main():
     # Step 3: Write output
     print(f"\nExtracted {len(translations)} translations with Japanese titles.")
 
-    with open(args.output, "w", encoding="utf-8") as f:
+    output_path = Path(args.output)
+    if not output_path.is_absolute():
+        output_path = PROJECT_ROOT / output_path
+
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(translations, f, ensure_ascii=False, indent=2)
 
-    print(f"Translations saved to {args.output}")
+    print(f"Translations saved to {output_path}")
 
     # Show some sample entries
     print("\nSample entries:")

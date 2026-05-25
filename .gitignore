@@ -160,3 +160,4 @@ charts/
 tmpclaude*
 *.db
 config/admin_signals.jsonl
+assets/

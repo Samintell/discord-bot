@@ -27,7 +27,7 @@ if sys.platform == "win32":
         pass
 
 # Configuration
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CHARTS_DIR = PROJECT_ROOT / "charts"
 REPO_URL = "https://github.com/Neskol/Maichart-Converts.git"
 CLONE_DIR = PROJECT_ROOT / "_maichart_repo"

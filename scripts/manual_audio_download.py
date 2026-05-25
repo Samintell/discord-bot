@@ -10,13 +10,15 @@ import yt_dlp
 import sys
 import argparse
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Configuration
-AUDIO_DIR = Path("audio")
-NEW_SONGS_DIR = Path("new_songs")
-OUTPUT_JSON = Path("output.json")
+AUDIO_DIR = PROJECT_ROOT / "audio"
+NEW_SONGS_DIR = PROJECT_ROOT / "new_songs"
+OUTPUT_JSON = PROJECT_ROOT / "output.json"
 AUDIO_FORMAT = "mp3"
 AUDIO_QUALITY = "5"  # 0=best, 9=worst
-PROGRESS_FILE = Path("manual_download_progress.json")
+PROGRESS_FILE = PROJECT_ROOT / "manual_download_progress.json"
 
 def parse_args():
     """Parse command line arguments."""
@@ -110,7 +112,7 @@ def find_songs_with_audio(songs):
 def download_audio(url, output_path):
     """Download audio from YouTube URL."""
     # Check if cookies.txt exists
-    cookies_file = Path("cookies.txt")
+    cookies_file = PROJECT_ROOT / "cookies.txt"
     
     ydl_opts = {
         'format': 'bestaudio/best',

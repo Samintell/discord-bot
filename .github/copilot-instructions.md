@@ -183,7 +183,7 @@ class GameSession:
   - `hard`: Random ~31.6% x ~31.6% crop (10% of area)
 
 ### Chart Handling
-- Chart data downloaded from Maichart-Converts GitHub repo via `download_charts.py`
+- Chart data downloaded from Maichart-Converts GitHub repo via `scripts/download_charts.py`
 - Processed simai chart files stored in `charts/` folder as `{song_id}_{difficulty}.txt`
 - `charts/chart_index.json` maps song_ids to available chart file paths
 - GIF rendering via Playwright + mai-notes.com player (`utils/chart_renderer.py`)
@@ -222,11 +222,14 @@ discord-bot/
 │   ├── gif_cache/        # Temporary chart GIFs (auto-cleaned)
 │   └── *.txt             # Individual simai chart files ({song_id}_{difficulty}.txt)
 ├── new_songs/            # New songs to be added
-├── convert_data.py       # Data conversion utility
-├── download_audio.py     # Audio download script using yt-dlp
-├── download_charts.py    # Chart download/processing from Maichart-Converts repo
-├── manual_audio_download.py  # Manual audio download helper
-├── replace_audio.py      # Audio replacement utility
+├── scripts/
+│   ├── convert_data.py       # Data conversion utility
+│   ├── download_audio.py     # Audio download script using yt-dlp
+│   ├── download_charts.py    # Chart download/processing from Maichart-Converts repo
+│   ├── manual_audio_download.py  # Manual audio download helper
+│   ├── replace_audio.py      # Audio replacement utility
+│   ├── scrape_sekaipedia.py  # Sekaipedia translation scraper
+│   └── update_remote.py      # Sync files to remote server via SCP
 ├── yt-dlp.conf           # yt-dlp configuration
 ├── data.json             # Additional data file
 └── translation_submissions.json  # User-submitted translation corrections (auto-generated)
@@ -285,7 +288,7 @@ Both English (lowercase) and Japanese names are accepted for filtering via `CATE
    ```
    Add the output to `.env`: `TOKEN_SECRET=<generated_key>`
 7. Enable Message Content Intent in Discord Developer Portal
-8. Download chart data: `python download_charts.py`
+8. Download chart data: `python scripts/download_charts.py`
 9. The SQLite database (`maimai_data.db`) is created automatically on first bot startup
 
 ### Running

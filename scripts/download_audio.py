@@ -9,10 +9,12 @@ from pathlib import Path
 import yt_dlp
 import time
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Configuration
-AUDIO_DIR = Path("audio")
-NEW_SONGS_DIR = Path("new_songs")
-OUTPUT_JSON = Path("output.json")
+AUDIO_DIR = PROJECT_ROOT / "audio"
+NEW_SONGS_DIR = PROJECT_ROOT / "new_songs"
+OUTPUT_JSON = PROJECT_ROOT / "output.json"
 AUDIO_FORMAT = "mp3"
 AUDIO_QUALITY = "5"  # 0=best, 9=worst
 PREVIEW_LENGTH = None  # None for full song, or set to seconds for preview
@@ -64,7 +66,7 @@ def get_audio_filename(song):
 def search_youtube(query):
     """Search YouTube and return the first video URL."""
     # Check if cookies.txt exists
-    cookies_file = Path("cookies.txt")
+    cookies_file = PROJECT_ROOT / "cookies.txt"
     
     ydl_opts = {
         'quiet': not DEBUG,
@@ -101,7 +103,7 @@ def search_youtube(query):
 def download_audio(url, output_path):
     """Download audio from YouTube URL."""
     # Check if cookies.txt exists
-    cookies_file = Path("cookies.txt")
+    cookies_file = PROJECT_ROOT / "cookies.txt"
     
     if DEBUG:
         print(f"  📥 Attempting download from: {url}")
