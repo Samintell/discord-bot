@@ -4,10 +4,11 @@ Update script to sync audio files and config between local and remote server.
 Remote host is read from REMOTE_HOST in .env or the environment.
 
 Operations:
-1. Pull remote config files and merge with local (union of entries, local wins on conflict)
-2. Push merged config files back to remote
-3. Copy audio files from new_songs/ to remote audio/ directory
-4. Sync assets/ folder to remote (creates remote folder if missing)
+1. Pull remote config files and merge with local (remote wins on conflict)
+2. Push local profile_shop.json to remote (overrides remote)
+3. Push merged config files back to remote
+4. Copy audio files from new_songs/ to remote audio/ directory
+5. Sync assets/ folder to remote (creates remote folder if missing)
 """
 
 import json
@@ -130,6 +131,11 @@ def merge_alias_dicts(local, remote):
     return merged
 
 
+def prefer_local(local, remote):
+    """Keep local data and ignore remote for overrides like profile_shop.json."""
+    return local
+
+
 def sync_configs():
     """Pull remote configs, merge with local, save locally, push merged to remote."""
     config_dir = PROJECT_ROOT / "config"
@@ -139,6 +145,7 @@ def sync_configs():
         "known_translations.json": merge_dicts,
         "romaji_overrides.json": merge_dicts,
         "aliases.json": merge_alias_dicts,
+        "profile_shop.json": prefer_local,
     }
 
     with tempfile.TemporaryDirectory() as tmpdir:

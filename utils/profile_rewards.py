@@ -21,6 +21,8 @@ ANSWER_TYPE_MULTIPLIERS = {
     "title": 1.0,
 }
 
+GLOBAL_MULTIPLIER = 2.0
+
 IMAGE_DIFFICULTY_MULTIPLIERS = {
     "easy": 1.0,
     "medium": 2.0,
@@ -65,13 +67,20 @@ def calculate_reward_breakdown(
     answer_multiplier = ANSWER_TYPE_MULTIPLIERS.get(answer_type, 1.0)
     length_multiplier = calculate_length_multiplier(mode, snippet_length, image_difficulty)
     pool_multiplier = calculate_pool_multiplier(eligible_song_count, total_song_count)
-    total_multiplier = mode_multiplier * answer_multiplier * length_multiplier * pool_multiplier
+    total_multiplier = (
+        mode_multiplier
+        * answer_multiplier
+        * length_multiplier
+        * pool_multiplier
+        * GLOBAL_MULTIPLIER
+    )
 
     return {
         "mode_multiplier": mode_multiplier,
         "answer_multiplier": answer_multiplier,
         "length_multiplier": length_multiplier,
         "pool_multiplier": pool_multiplier,
+        "global_multiplier": GLOBAL_MULTIPLIER,
         "total_multiplier": total_multiplier,
     }
 
