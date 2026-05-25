@@ -80,16 +80,6 @@ Commands sync automatically on startup. Use `q>sync` (bot owner only) to force-s
 | `/report_translation` | Report an incorrect English translation |
 | `/report_audio` | Report an audio issue |
 
-### Prefix Commands (`q>`)
-
-| Command | Description |
-|---------|-------------|
-| `q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty]` | Start a quiz |
-| `q>skip` | Skip current round |
-| `q>stop` | Stop the game |
-| `q>lb` | Show leaderboard |
-| `q>qhelp` | Show help |
-
 ### Admin Bot Commands (restricted)
 
 These commands are hosted by the admin bot and will apply changes to the main bot.

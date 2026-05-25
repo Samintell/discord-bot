@@ -1,7 +1,7 @@
 """
 Update script to sync audio files and config between local and remote server.
 
-Remote: botuser@159.65.167.59:/home/botuser/discord-bot
+Remote host is read from REMOTE_HOST in .env or the environment.
 
 Operations:
 1. Pull remote config files and merge with local (union of entries, local wins on conflict)
@@ -11,15 +11,48 @@ Operations:
 """
 
 import json
+import os
 import subprocess
 import sys
 import shutil
 import tempfile
 from pathlib import Path
 
-REMOTE_HOST = "botuser@159.65.167.59"
-REMOTE_DIR = "/home/botuser/discord-bot"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+ENV_FILE = PROJECT_ROOT / ".env"
+REMOTE_DIR = "/home/botuser/discord-bot"
+
+
+def load_env_value(key: str) -> str | None:
+    env_value = os.environ.get(key)
+    if env_value:
+        return env_value
+
+    if not ENV_FILE.exists():
+        return None
+
+    try:
+        for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, value = stripped.split("=", 1)
+            if name.strip() == key:
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        return None
+
+    return None
+
+
+REMOTE_HOST = load_env_value("REMOTE_HOST")
+
+
+def require_remote_host() -> None:
+    if REMOTE_HOST:
+        return
+    print("ERROR: REMOTE_HOST is not set. Add REMOTE_HOST=... to .env or your environment.")
+    sys.exit(1)
 
 
 def run_cmd(cmd, check=True):
@@ -196,6 +229,7 @@ def push_assets():
 
 
 def main():
+    require_remote_host()
     print("=" * 60)
     print("MaiMai Quiz Bot - Remote Update Script")
     print(f"Remote: {REMOTE_HOST}:{REMOTE_DIR}")

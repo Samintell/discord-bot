@@ -134,13 +134,6 @@ cryptography>=41.0.0
 - `/fetch` - Fetch/refresh scores from maimai NET (ephemeral)
 - `/mystats` - Show summary of cached maimai NET scores (ephemeral)
 
-#### Prefix Commands (`q>`)
-- `q>quiz [mode] [answer_type] [rounds] [time_limit] [snippet_length] [image_difficulty]`
-- `q>skip` - Skip current round
-- `q>stop` - Stop game
-- `q>lb` or `q>leaderboard` - Show scores
-- `q>qhelp` - Show help
-
 ### State Management (`GameSession` class)
 ```python
 class GameSession:

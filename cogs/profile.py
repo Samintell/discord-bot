@@ -219,14 +219,17 @@ class ProfileCog(commands.Cog):
     async def shop_list(self, interaction: discord.Interaction, item_type: Optional[str] = None):
         items = load_shop_items()
         item_rows: list[tuple[str, dict]] = []
+        owned_ids = set(await list_inventory_items(str(interaction.user.id), item_type=item_type))
 
         for item_id, item in sorted(items.items()):
             if item_type and item.get("type") != item_type:
                 continue
+            if item_id in owned_ids:
+                continue
             item_rows.append((item_id, item))
 
         if not item_rows:
-            await interaction.response.send_message("No items found for that filter.", ephemeral=True)
+            await interaction.response.send_message("No unowned items found for that filter.", ephemeral=True)
             return
 
         view = ShopItemsView(

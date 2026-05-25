@@ -6,11 +6,11 @@ import math
 from typing import Dict
 
 from utils.constants import DEFAULT_SNIPPET_LENGTH
-MIN_POOL_SIZE = 20
+MIN_POOL_SIZE = 10
 MAX_POOL_MULTIPLIER = 5.0
 
 MODE_MULTIPLIERS = {
-    "image": 1.0,
+    "image": 2.0,
     "audio": 5.0,
     "chart": 10.0,
 }
