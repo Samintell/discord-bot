@@ -591,10 +591,10 @@ class QuizCog(commands.Cog):
         # Validate score filter parameters
         score_user_id = None
         score_song_ids = None
+        score_chart_keys = None
         if score_difficulty:
             if not score_rank and not score_combo:
                 self.creating_games.discard(channel_id)
-        score_chart_keys = None
                 await interaction.response.send_message(
                     "When using score_difficulty, you must also specify score_rank and/or score_combo.",
                     ephemeral=True,
@@ -621,9 +621,6 @@ class QuizCog(commands.Cog):
             if "master" in difficulties and "remaster" not in difficulties:
                 difficulties.append("remaster")
 
-            score_song_ids = await get_filtered_song_ids(
-                score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
-            )
             if mode == "chart":
                 score_chart_keys = await get_filtered_chart_keys(
                     score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
@@ -632,6 +629,14 @@ class QuizCog(commands.Cog):
                 score_song_ids = await get_filtered_song_ids(
                     score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
                 )
+
+            if mode == "chart":
+                no_scores = not score_chart_keys
+            else:
+                no_scores = not score_song_ids
+
+            if no_scores:
+                filter_desc = f"{score_difficulty}"
                 if score_rank:
                     filter_desc += f" {score_rank}+"
                 if score_combo:
@@ -726,6 +731,15 @@ class QuizCog(commands.Cog):
             # Filter by user's score data if specified
             if score_song_ids is not None:
                 all_songs = [s for s in all_songs if s.get('song_id') in score_song_ids]
+            if score_chart_keys is not None and mode == 'chart':
+                all_songs = [
+                    s for s in all_songs
+                    if (
+                        s.get('song_id'),
+                        str(s.get('type', '')).lower(),
+                        str(s.get('difficulty', '')).lower(),
+                    ) in score_chart_keys
+                ]
 
             songs = all_songs
             
