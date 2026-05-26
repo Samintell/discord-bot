@@ -216,6 +216,51 @@ async def get_filtered_song_ids(
         return {row[0] for row in rows}
 
 
+async def get_filtered_chart_keys(
+    discord_user_id: str,
+    difficulties: List[str],
+    min_rank: Optional[str] = None,
+    min_combo: Optional[str] = None,
+) -> Set[tuple[str, str, str]]:
+    """Get (song_id, chart_type, difficulty) where scores meet thresholds.
+
+    Returns a set of tuples matching the requested difficulties. This is
+    useful for chart mode so std/dx and master/remaster are respected.
+    """
+    conditions = ["discord_user_id = ?"]
+    params: list = [discord_user_id]
+
+    placeholders = ",".join("?" for _ in difficulties)
+    conditions.append(f"difficulty IN ({placeholders})")
+    params.extend(difficulties)
+
+    if min_rank and min_rank in RANK_THRESHOLDS:
+        conditions.append("achievement >= ?")
+        params.append(RANK_THRESHOLDS[min_rank])
+
+    if min_combo and min_combo.lower() in FC_HIERARCHY:
+        min_fc_index = FC_HIERARCHY.index(min_combo.lower())
+        valid_fc = FC_HIERARCHY[min_fc_index:]
+        fc_placeholders = ",".join("?" for _ in valid_fc)
+        conditions.append(f"fc IN ({fc_placeholders})")
+        params.extend(valid_fc)
+
+    where_clause = " AND ".join(conditions)
+    query = (
+        "SELECT DISTINCT song_id, chart_type, difficulty "
+        "FROM user_scores WHERE "
+        f"{where_clause}"
+    )
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+        return {
+            (row[0], str(row[1]).lower(), str(row[2]).lower())
+            for row in rows
+        }
+
+
 async def has_scores(discord_user_id: str) -> bool:
     """Check if a user has any cached scores."""
     async with aiosqlite.connect(DB_PATH) as db:

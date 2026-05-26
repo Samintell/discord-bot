@@ -17,7 +17,13 @@ import sys
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.song_loader import load_songs, get_song_image_path, get_song_audio_path, get_song_chart_path, get_song_difficulties
+from utils.song_loader import (
+    load_songs,
+    get_song_image_path,
+    get_song_audio_path,
+    get_song_chart_path,
+    get_song_chart_variants,
+)
 from utils.matcher import check_answer
 from utils.config_manager import get_aliases_for_song
 from utils.constants import (
@@ -32,7 +38,7 @@ from utils.constants import (
     DEFAULT_SNIPPET_LENGTH,
     DEFAULT_IMAGE_DIFFICULTY,
 )
-from utils.database import get_filtered_song_ids, has_scores, record_quiz_rewards
+from utils.database import get_filtered_song_ids, get_filtered_chart_keys, has_scores, record_quiz_rewards
 from utils.profile_rewards import calculate_reward_breakdown, calculate_coin_reward
 
 
@@ -373,22 +379,54 @@ class QuizCog(commands.Cog):
         
         return ' / '.join(parts)
     
-    def get_difficulty_display(self, song: dict) -> str:
-        """Get difficulty level display string showing both master and remaster if available."""
-        song_id = song.get('song_id', '')
-        if song_id:
-            difficulties = get_song_difficulties(song_id)
-            if difficulties:
-                parts = []
-                for diff_type in ('master', 'remaster'):
-                    if diff_type in difficulties:
-                        parts.append(f"Lv.{difficulties[diff_type]} ({diff_type})")
-                if parts:
-                    return ' | '.join(parts)
-        # Fallback to single difficulty from the song entry
+    def get_chart_entry_display(self, song: dict) -> str:
+        """Get display string for the specific chart entry (std/dx + difficulty)."""
+        chart_type = (song.get('type') or '').lower()
+        if chart_type == 'dx':
+            type_label = 'DX'
+        elif chart_type == 'std':
+            type_label = 'STD'
+        else:
+            type_label = chart_type.upper() if chart_type else 'Chart'
+
+        diff_type = song.get('difficulty', '')
+        diff_label = 'Re:Master' if diff_type == 'remaster' else diff_type.title() if diff_type else 'Unknown'
         level = song.get('level', 0)
-        difficulty_type = song.get('difficulty', 'master')
-        return f"Lv.{level} ({difficulty_type})"
+        return f"{type_label} Lv.{level} ({diff_label})"
+
+    def get_song_difficulty_summary(self, song: dict) -> str:
+        """Get a summary string of all master/remaster charts for the song."""
+        song_id = song.get('song_id', '')
+        if not song_id:
+            return self.get_chart_entry_display(song)
+
+        variants = get_song_chart_variants(song_id)
+        if not variants:
+            return self.get_chart_entry_display(song)
+
+        parts = []
+        ordered_types = ["std", "dx"]
+        extra_types = sorted(t for t in variants.keys() if t not in ordered_types)
+        for chart_type in ordered_types + extra_types:
+            diff_map = variants.get(chart_type, {})
+            if not diff_map:
+                continue
+            diff_parts = []
+            for diff_type in ("master", "remaster"):
+                if diff_type in diff_map:
+                    label = "Re:Master" if diff_type == "remaster" else "Master"
+                    diff_parts.append(f"Lv.{diff_map[diff_type]} ({label})")
+            if diff_parts:
+                type_label = "DX" if chart_type == "dx" else "STD" if chart_type == "std" else chart_type.upper()
+                parts.append(f"{type_label}: {', '.join(diff_parts)}")
+
+        return " | ".join(parts) if parts else self.get_chart_entry_display(song)
+
+    def get_difficulty_display(self, song: dict, mode: Optional[str] = None) -> str:
+        """Get difficulty display string; chart mode shows only the current entry."""
+        if mode == 'chart':
+            return self.get_chart_entry_display(song)
+        return self.get_song_difficulty_summary(song)
     
     def crop_image_for_difficulty(self, image_path: str, difficulty: str) -> io.BytesIO:
         """Crop image based on difficulty level.
@@ -556,6 +594,7 @@ class QuizCog(commands.Cog):
         if score_difficulty:
             if not score_rank and not score_combo:
                 self.creating_games.discard(channel_id)
+        score_chart_keys = None
                 await interaction.response.send_message(
                     "When using score_difficulty, you must also specify score_rank and/or score_combo.",
                     ephemeral=True,
@@ -585,9 +624,14 @@ class QuizCog(commands.Cog):
             score_song_ids = await get_filtered_song_ids(
                 score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
             )
-
-            if not score_song_ids:
-                filter_desc = f"{score_difficulty}"
+            if mode == "chart":
+                score_chart_keys = await get_filtered_chart_keys(
+                    score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
+                )
+            else:
+                score_song_ids = await get_filtered_song_ids(
+                    score_user_id, difficulties, min_rank=score_rank, min_combo=score_combo
+                )
                 if score_rank:
                     filter_desc += f" {score_rank}+"
                 if score_combo:
@@ -1040,10 +1084,10 @@ class QuizCog(commands.Cog):
             embed.add_field(name="✅ Correct Answer", value=correct_answer, inline=False)
             if game.answer_type == 'title':
                 embed.add_field(name="Artist", value=artist, inline=False)
-                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
+                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
             elif game.answer_type == 'artist':
-                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
+                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
             elif game.answer_type == 'difficulty':
                 title_display = song.get('romaji') or song.get('title', 'Unknown')
@@ -1123,7 +1167,7 @@ class QuizCog(commands.Cog):
                 embed.add_field(name="Artist", value=artist, inline=False)
                 embed.add_field(name="Version", value=version, inline=True)
             else:
-                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
+                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
             if game.answer_type == 'title':
                 embed.add_field(name="Artist", value=artist, inline=False)
@@ -1205,10 +1249,10 @@ class QuizCog(commands.Cog):
             embed.add_field(name="✅ Correct Answer", value=correct_answer, inline=False)
             if game.answer_type == 'title':
                 embed.add_field(name="Artist", value=artist, inline=False)
-                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
+                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
             elif game.answer_type == 'artist':
-                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song), inline=True)
+                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
                 embed.add_field(name="Version", value=version, inline=True)
             elif game.answer_type == 'difficulty':
                 title_display = song.get('romaji') or song.get('title', 'Unknown')
@@ -1493,6 +1537,7 @@ class QuizCog(commands.Cog):
             # Apply score filter if it was used
             replay_score_difficulty = config.get('score_difficulty')
             replay_score_user_id = config.get('score_user_id')
+            score_chart_keys = None
             if replay_score_difficulty and replay_score_user_id:
                 if "+" in replay_score_difficulty:
                     difficulties = [d.strip() for d in replay_score_difficulty.split("+")]
@@ -1501,12 +1546,27 @@ class QuizCog(commands.Cog):
                 # "master" implicitly includes "remaster"
                 if "master" in difficulties and "remaster" not in difficulties:
                     difficulties.append("remaster")
-                score_song_ids = await get_filtered_song_ids(
-                    replay_score_user_id, difficulties,
-                    min_rank=config.get('score_rank'),
-                    min_combo=config.get('score_combo'),
-                )
-                all_songs = [s for s in all_songs if s.get('song_id') in score_song_ids]
+                if mode == "chart":
+                    score_chart_keys = await get_filtered_chart_keys(
+                        replay_score_user_id, difficulties,
+                        min_rank=config.get('score_rank'),
+                        min_combo=config.get('score_combo'),
+                    )
+                    all_songs = [
+                        s for s in all_songs
+                        if (
+                            s.get('song_id'),
+                            str(s.get('type', '')).lower(),
+                            str(s.get('difficulty', '')).lower(),
+                        ) in score_chart_keys
+                    ]
+                else:
+                    score_song_ids = await get_filtered_song_ids(
+                        replay_score_user_id, difficulties,
+                        min_rank=config.get('score_rank'),
+                        min_combo=config.get('score_combo'),
+                    )
+                    all_songs = [s for s in all_songs if s.get('song_id') in score_song_ids]
 
             songs = all_songs
             

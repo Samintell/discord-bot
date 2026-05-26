@@ -117,6 +117,34 @@ def get_song_difficulties(song_id: str) -> Dict[str, float]:
                 difficulties[diff] = level
     return difficulties
 
+
+def get_song_chart_variants(song_id: str) -> Dict[str, Dict[str, float]]:
+    """
+    Look up master/remaster charts for a song_id grouped by chart type.
+
+    Returns:
+        Dict like {"std": {"master": 12.5, "remaster": 13.0}, "dx": {"master": 12.7}}
+        Uses the highest level per (chart_type, difficulty).
+    """
+    all_songs = _get_all_songs()
+
+    variants: Dict[str, Dict[str, float]] = {}
+    for song in all_songs:
+        if song.get("song_id") != song_id:
+            continue
+        diff = song.get("difficulty", "")
+        if diff not in ("master", "remaster"):
+            continue
+        chart_type = (song.get("type") or "std").lower()
+        level = song.get("level", 0)
+        if chart_type not in variants:
+            variants[chart_type] = {}
+        current = variants[chart_type].get(diff)
+        if current is None or level > current:
+            variants[chart_type][diff] = level
+
+    return variants
+
 def get_song_image_path(song: Dict) -> Optional[Path]:
     """Get the path to a song's cover image."""
     image_name = song.get('image')
