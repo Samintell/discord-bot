@@ -3,14 +3,18 @@ Update script to sync audio files and config between local and remote server.
 
 Remote host is read from REMOTE_HOST in .env or the environment.
 
-Operations:
+Operations (default):
 1. Pull remote config files and merge with local (remote wins on conflict)
 2. Push local profile_shop.json to remote (overrides remote)
 3. Push merged config files back to remote
 4. Copy audio files from new_songs/ to remote audio/ directory
 5. Sync assets/ folder to remote (creates remote folder if missing)
+
+Options:
+--audio-only: Only upload new audio files (skip config and assets sync)
 """
 
+import argparse
 import json
 import os
 import subprocess
@@ -54,6 +58,16 @@ def require_remote_host() -> None:
         return
     print("ERROR: REMOTE_HOST is not set. Add REMOTE_HOST=... to .env or your environment.")
     sys.exit(1)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Sync local changes to the remote server.")
+    parser.add_argument(
+        "--audio-only",
+        action="store_true",
+        help="Only upload new audio files from new_songs/.",
+    )
+    return parser.parse_args()
 
 
 def run_cmd(cmd, check=True):
@@ -236,33 +250,41 @@ def push_assets():
 
 
 def main():
+    args = parse_args()
     require_remote_host()
     print("=" * 60)
     print("MaiMai Quiz Bot - Remote Update Script")
     print(f"Remote: {REMOTE_HOST}:{REMOTE_DIR}")
     print("=" * 60)
 
-    # Step 1: Sync configs (pull, merge, push)
-    print("\n[1/3] Syncing config files...")
-    try:
-        sync_configs()
-    except Exception as e:
-        print(f"\n  ERROR syncing configs: {e}")
-        print("  Continuing with audio upload...")
+    if args.audio_only:
+        print("\n[1/1] Uploading new audio files...")
+        try:
+            push_new_audio()
+        except Exception as e:
+            print(f"\n  ERROR uploading audio: {e}")
+    else:
+        # Step 1: Sync configs (pull, merge, push)
+        print("\n[1/3] Syncing config files...")
+        try:
+            sync_configs()
+        except Exception as e:
+            print(f"\n  ERROR syncing configs: {e}")
+            print("  Continuing with audio upload...")
 
-    # Step 2: Push new audio files
-    print("\n[2/3] Uploading new audio files...")
-    try:
-        push_new_audio()
-    except Exception as e:
-        print(f"\n  ERROR uploading audio: {e}")
+        # Step 2: Push new audio files
+        print("\n[2/3] Uploading new audio files...")
+        try:
+            push_new_audio()
+        except Exception as e:
+            print(f"\n  ERROR uploading audio: {e}")
 
-    # Step 3: Sync assets folder
-    print("\n[3/3] Syncing assets folder...")
-    try:
-        push_assets()
-    except Exception as e:
-        print(f"\n  ERROR syncing assets: {e}")
+        # Step 3: Sync assets folder
+        print("\n[3/3] Syncing assets folder...")
+        try:
+            push_assets()
+        except Exception as e:
+            print(f"\n  ERROR syncing assets: {e}")
 
     print("\n" + "=" * 60)
     print("Update complete.")
