@@ -57,7 +57,14 @@ class ChartRenderer:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-gpu"],
+            args=[
+                "--no-sandbox",
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--mute-audio",
+                "--js-flags=--max-old-space-size=128",
+            ],
         )
 
     async def _get_page(self):
