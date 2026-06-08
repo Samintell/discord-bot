@@ -67,22 +67,21 @@ class ChartRenderer:
             ],
         )
 
-    async def _get_page(self):
-        """Get or create a reusable page with the player loaded."""
-        if self._page is not None and not self._page.is_closed():
-            return self._page
-
-        if not self._browser:
-            await self.initialize()
-
-        self._page = await self._browser.new_page(
-            viewport={"width": 600, "height": 800}
-        )
-        await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
-        await asyncio.sleep(1)
+    async def _apply_page_settings(self, page) -> None:
+        """Apply custom canvas size and display settings on the player page."""
+        # Resize the canvas to CANVAS_SIZE so capturing frames uses less memory
+        await page.evaluate(f"""(() => {{
+            const canvas = document.querySelector('#chartCanvas');
+            if (canvas) {{
+                canvas.width = {CANVAS_SIZE};
+                canvas.height = {CANVAS_SIZE};
+                canvas.style.width = '{CANVAS_SIZE}px';
+                canvas.style.height = '{CANVAS_SIZE}px';
+            }}
+        }})()""")
 
         # Disable unnecessary hints via UI checkboxes to hide BPM, notes, and break counts
-        await self._page.evaluate("""(() => {
+        await page.evaluate("""(() => {
             const hideSetting = (id) => {
                 const el = document.querySelector(id);
                 if (el && el.checked) {
@@ -95,6 +94,33 @@ class ChartRenderer:
             hideSetting('#showBreakCount');
             hideSetting('#showBreakIndex');
         })()""")
+
+    async def _get_page(self):
+        """Get or create a reusable page with the player loaded."""
+        if self._page is not None and not self._page.is_closed():
+            # Reload page to clean up third-party player JS state and memory leakage
+            try:
+                await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
+                await asyncio.sleep(1)
+                await self._apply_page_settings(self._page)
+                return self._page
+            except Exception as e:
+                print(f"Error reloading page: {e}")
+                try:
+                    await self._page.close()
+                except Exception:
+                    pass
+                self._page = None
+
+        if not self._browser:
+            await self.initialize()
+
+        self._page = await self._browser.new_page(
+            viewport={"width": 600, "height": 800}
+        )
+        await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
+        await asyncio.sleep(1)
+        await self._apply_page_settings(self._page)
 
         return self._page
 
