@@ -69,17 +69,6 @@ class ChartRenderer:
 
     async def _apply_page_settings(self, page) -> None:
         """Apply custom canvas size and display settings on the player page."""
-        # Resize the canvas to CANVAS_SIZE so capturing frames uses less memory
-        await page.evaluate(f"""(() => {{
-            const canvas = document.querySelector('#chartCanvas');
-            if (canvas) {{
-                canvas.width = {CANVAS_SIZE};
-                canvas.height = {CANVAS_SIZE};
-                canvas.style.width = '{CANVAS_SIZE}px';
-                canvas.style.height = '{CANVAS_SIZE}px';
-            }}
-        }})()""")
-
         # Disable unnecessary hints via UI checkboxes to hide BPM, notes, and break counts
         await page.evaluate("""(() => {
             const hideSetting = (id) => {
@@ -116,7 +105,7 @@ class ChartRenderer:
             await self.initialize()
 
         self._page = await self._browser.new_page(
-            viewport={"width": 600, "height": 800}
+            viewport={"width": 370, "height": 520}
         )
         await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
         await asyncio.sleep(1)
@@ -306,13 +295,13 @@ class ChartRenderer:
                         ctx.save();
                         ctx.fillStyle = '#fff';
                         ctx.strokeStyle = '#000';
-                        ctx.lineWidth = 4;
-                        ctx.font = 'bold 24px sans-serif';
+                        ctx.lineWidth = 3;
+                        ctx.font = 'bold 14px sans-serif';
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'top';
                         const text = pct + '%';
-                        ctx.strokeText(text, c.width / 2, 20);
-                        ctx.fillText(text, c.width / 2, 20);
+                        ctx.strokeText(text, c.width / 2, 10);
+                        ctx.fillText(text, c.width / 2, 10);
                         ctx.restore();
                         
                         r(c.toDataURL('image/jpeg', 0.7));
