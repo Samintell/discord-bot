@@ -931,145 +931,193 @@ class QuizCog(commands.Cog):
         if not game:
             return
         
-        song = game.next_song()
-        if not song:
-            await self.end_game(channel)
-            return
-        
-        game.round_start_time = datetime.now()
-        
-        # Create skip button view
-        skip_view = SkipButton(self, channel, game.host_id, timeout=game.time_limit + 10)
-        
-        # Create round embed
-        embed = discord.Embed(
-            title=f"🎮 Round {game.current_round}/{game.total_rounds}",
-            description=f"**Guess the {game.answer_type}!**\nType your answer in chat.",
-            color=discord.Color.green()
-        )
-        
-        # Add hint based on answer type
-        if game.answer_type == 'artist':
-            embed.add_field(name="🎤 Artist", value="???", inline=True)
-            embed.add_field(name="📝 Title", value=song.get('romaji') or song.get('title'), inline=True)
-        elif game.answer_type == 'difficulty':
-            embed.add_field(name="Difficulty", value="???", inline=True)
-        else:  # title mode
-            embed.add_field(name="📝 Title", value="???", inline=True)
-        
-        embed.add_field(name="⏱️ Time Limit", value=f"{game.time_limit}s", inline=True)
-        
-        # Add media
-        if game.mode == 'image':
-            image_path = get_song_image_path(song)
-            if image_path:
-                # Crop image based on difficulty
-                cropped_image = self.crop_image_for_difficulty(image_path, game.image_difficulty)
-                file = discord.File(cropped_image, filename="cover.png")
-                embed.set_image(url="attachment://cover.png")
-                await channel.send(embed=embed, file=file, view=skip_view)
-            else:
-                await channel.send(embed=embed, view=skip_view)
-        elif game.mode == 'audio':
-            # Send embed first with skip button
-            await channel.send(embed=embed, view=skip_view)
+        try:
+            song = game.next_song()
+            if not song:
+                await self.end_game(channel)
+                return
             
-            # Then send audio snippet as voice message
-            audio_path = get_song_audio_path(song)
-            if audio_path:
-                # Create audio snippet
-                snippet_path = await self.create_audio_snippet(audio_path, game.snippet_length, channel.id)
-                if snippet_path:
+            game.round_start_time = datetime.now()
+            
+            # Create skip button view
+            skip_view = SkipButton(self, channel, game.host_id, timeout=game.time_limit + 10)
+            
+            # Create round embed
+            embed = discord.Embed(
+                title=f"🎮 Round {game.current_round}/{game.total_rounds}",
+                description=f"**Guess the {game.answer_type}!**\nType your answer in chat.",
+                color=discord.Color.green()
+            )
+            
+            # Add hint based on answer type
+            if game.answer_type == 'artist':
+                embed.add_field(name="🎤 Artist", value="???", inline=True)
+                embed.add_field(name="📝 Title", value=song.get('romaji') or song.get('title'), inline=True)
+            elif game.answer_type == 'difficulty':
+                embed.add_field(name="Difficulty", value="???", inline=True)
+            else:  # title mode
+                embed.add_field(name="📝 Title", value="???", inline=True)
+            
+            embed.add_field(name="⏱️ Time Limit", value=f"{game.time_limit}s", inline=True)
+            
+            # Add media
+            if game.mode == 'image':
+                image_path = get_song_image_path(song)
+                if image_path:
                     try:
-                        # Try to send as voice message
-                        success = await self.send_voice_message(channel, snippet_path, game.snippet_length)
-                        if not success:
-                            # Fall back to regular file
-                            file = discord.File(snippet_path, filename="snippet.ogg")
-                            await channel.send(file=file)
+                        # Crop image based on difficulty
+                        cropped_image = self.crop_image_for_difficulty(image_path, game.image_difficulty)
+                        file = discord.File(cropped_image, filename="cover.png")
+                        embed.set_image(url="attachment://cover.png")
+                        await channel.send(embed=embed, file=file, view=skip_view)
                     except Exception as e:
-                        print(f"Error sending audio: {e}")
-                        # Fall back to regular file
-                        try:
-                            file = discord.File(snippet_path, filename="snippet.ogg")
-                            await channel.send(file=file)
-                        except:
-                            pass
-                    
-                    # Clean up snippet file if it's not the original
-                    if snippet_path != str(audio_path):
-                        try:
-                            Path(snippet_path).unlink()
-                        except:
-                            pass
-                else:
-                    # Fall back to full audio if snippet creation fails
-                    file = discord.File(audio_path, filename="song.mp3")
-                    await channel.send(file=file)
-            else:
-                pass  # No audio file available
-        elif game.mode == 'chart':
-            gif_path = None
-
-            # Check if a pre-rendered GIF is available from the previous round
-            if game._next_gif_future is not None:
-                try:
-                    prerendered_path = await game._next_gif_future
-                    if prerendered_path and Path(prerendered_path).exists():
-                        gif_path = Path(prerendered_path)
-                except Exception:
-                    pass
-                finally:
-                    game._next_gif_future = None
-
-            # If no pre-render available (round 1 or pre-render failed), render synchronously
-            if gif_path is None:
-                chart_path = get_song_chart_path(song, difficulty=song.get('difficulty', 'master'))
-                if chart_path:
-                    try:
-                        renderer = await self.get_chart_renderer()
-                        gif_path = await renderer.render_chart_gif(
-                            chart_path=chart_path,
-                            excerpt_duration=float(game.snippet_length),
+                        print(f"Error sending round image: {e}")
+                        # Fallback: remove image and send embed only
+                        embed.set_image(url=None)
+                        await channel.send(
+                            content="⚠️ (Failed to load/send cropped image cover.png, proceeding with text-only embed)",
+                            embed=embed,
+                            view=skip_view
                         )
-                    except Exception as e:
-                        print(f"Error rendering chart: {e}")
+                else:
+                    await channel.send(embed=embed, view=skip_view)
+            elif game.mode == 'audio':
+                # Send embed first with skip button
+                await channel.send(embed=embed, view=skip_view)
+                
+                # Then send audio snippet as voice message
+                audio_path = get_song_audio_path(song)
+                if audio_path:
+                    # Create audio snippet
+                    snippet_path = await self.create_audio_snippet(audio_path, game.snippet_length, channel.id)
+                    if snippet_path:
+                        try:
+                            # Try to send as voice message
+                            success = await self.send_voice_message(channel, snippet_path, game.snippet_length)
+                            if not success:
+                                # Fall back to regular file
+                                file = discord.File(snippet_path, filename="snippet.ogg")
+                                await channel.send(file=file)
+                        except Exception as e:
+                            print(f"Error sending audio: {e}")
+                            # Fall back to regular file
+                            try:
+                                file = discord.File(snippet_path, filename="snippet.ogg")
+                                await channel.send(file=file)
+                            except Exception as inner_e:
+                                print(f"Fallback audio send also failed: {inner_e}")
+                                await channel.send("⚠️ (Audio snippet playback failed to upload)")
+                        
+                        # Clean up snippet file if it's not the original
+                        if snippet_path != str(audio_path):
+                            try:
+                                Path(snippet_path).unlink()
+                            except:
+                                pass
+                    else:
+                        # Fall back to full audio if snippet creation fails
+                        try:
+                            file = discord.File(audio_path, filename="song.mp3")
+                            await channel.send(file=file)
+                        except Exception as e:
+                            print(f"Error sending full audio fallback: {e}")
+                            await channel.send("⚠️ (Audio file failed to upload)")
+                else:
+                    pass  # No audio file available
+            elif game.mode == 'chart':
+                gif_path = None
 
-            # Bail out if someone answered/skipped during rendering
-            if game.answered:
+                # Check if a pre-rendered GIF is available from the previous round
+                if game._next_gif_future is not None:
+                    try:
+                        # Limit waiting to 15 seconds to avoid infinite hangs if playwright freezes
+                        prerendered_path = await asyncio.wait_for(game._next_gif_future, timeout=15.0)
+                        if prerendered_path and Path(prerendered_path).exists():
+                            gif_path = Path(prerendered_path)
+                    except asyncio.TimeoutError:
+                        print("Timeout waiting for pre-rendered chart GIF")
+                        try:
+                            game._next_gif_future.cancel()
+                        except:
+                            pass
+                    except Exception as e:
+                        print(f"Error retrieving pre-rendered chart path: {e}")
+                    finally:
+                        game._next_gif_future = None
+
+                # If no pre-render available (round 1 or pre-render failed), render synchronously
+                if gif_path is None:
+                    chart_path = get_song_chart_path(song, difficulty=song.get('difficulty', 'master'))
+                    if chart_path:
+                        try:
+                            renderer = await self.get_chart_renderer()
+                            gif_path = await asyncio.wait_for(
+                                renderer.render_chart_gif(
+                                    chart_path=chart_path,
+                                    excerpt_duration=float(game.snippet_length),
+                                ),
+                                timeout=20.0
+                            )
+                        except asyncio.TimeoutError:
+                            print("Timeout rendering chart synchronously")
+                        except Exception as e:
+                            print(f"Error rendering chart: {e}")
+
+                # Bail out if someone answered/skipped during rendering
+                if game.answered:
+                    if gif_path:
+                        try:
+                            Path(gif_path).unlink()
+                        except Exception:
+                            pass
+                    return
+
                 if gif_path:
+                    try:
+                        file = discord.File(str(gif_path), filename="chart.gif")
+                        embed.set_image(url="attachment://chart.gif")
+                        await channel.send(embed=embed, file=file, view=skip_view)
+                    except Exception as e:
+                        print(f"Error sending chart GIF: {e}")
+                        # Fallback: remove image and send text
+                        embed.set_image(url=None)
+                        await channel.send(
+                            content="⚠️ (Failed to upload chart.gif, proceeding with text-only embed)",
+                            embed=embed,
+                            view=skip_view
+                        )
+                    
+                    # Clean up temporary GIF
                     try:
                         Path(gif_path).unlink()
                     except Exception:
                         pass
-                return
+                else:
+                    await channel.send(
+                        content="(Chart rendering failed)",
+                        embed=embed, view=skip_view
+                    )
 
-            if gif_path:
-                file = discord.File(str(gif_path), filename="chart.gif")
-                embed.set_image(url="attachment://chart.gif")
-                await channel.send(embed=embed, file=file, view=skip_view)
-                # Clean up temporary GIF
-                try:
-                    Path(gif_path).unlink()
-                except Exception:
-                    pass
-            else:
-                await channel.send(
-                    content="(Chart rendering failed)",
-                    embed=embed, view=skip_view
+            # Round is now ready to accept guesses
+            game.round_ready = True
+
+            # Start timeout timer
+            game.timeout_task = asyncio.create_task(self.round_timeout(channel))
+
+            # Pre-render next chart GIF in the background while players guess
+            if game.mode == 'chart' and game.song_pool:
+                game._next_gif_future = asyncio.create_task(
+                    self._prerender_next_chart(game)
                 )
-
-        # Round is now ready to accept guesses
-        game.round_ready = True
-
-        # Start timeout timer
-        game.timeout_task = asyncio.create_task(self.round_timeout(channel))
-
-        # Pre-render next chart GIF in the background while players guess
-        if game.mode == 'chart' and game.song_pool:
-            game._next_gif_future = asyncio.create_task(
-                self._prerender_next_chart(game)
-            )
+        except Exception as e:
+            print(f"Error in start_round: {e}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await channel.send("⚠️ An unexpected error occurred while starting the round. The game has been ended to prevent getting stuck.")
+            except Exception:
+                pass
+            await self.end_game(channel, cancelled=True)
     
     async def round_timeout(self, channel: discord.TextChannel):
         """Handle round timeout."""
@@ -1112,9 +1160,14 @@ class QuizCog(commands.Cog):
             # Add song image
             image_path = get_song_image_path(song)
             if image_path:
-                file = discord.File(image_path, filename="answer.png")
-                embed.set_thumbnail(url="attachment://answer.png")
-                await channel.send(embed=embed, file=file)
+                try:
+                    file = discord.File(image_path, filename="answer.png")
+                    embed.set_thumbnail(url="attachment://answer.png")
+                    await channel.send(embed=embed, file=file)
+                except Exception as img_err:
+                    print(f"Error sending timeout answer image: {img_err}")
+                    embed.set_thumbnail(url=None)
+                    await channel.send(embed=embed)
             else:
                 await channel.send(embed=embed)
             
@@ -1127,6 +1180,11 @@ class QuizCog(commands.Cog):
             
         except asyncio.CancelledError:
             pass  # Task was cancelled (someone answered)
+        except Exception as e:
+            print(f"Error in round_timeout: {e}")
+            import traceback
+            traceback.print_exc()
+            await self.end_game(channel, cancelled=True)
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -1149,59 +1207,70 @@ class QuizCog(commands.Cog):
             return
         
         # Check answer
-        if check_answer(message.content, game.current_song, game.answer_type, aliases=game.current_aliases):
-            game.answered = True
-            
-            # Cancel timeout
-            if game.timeout_task:
-                game.timeout_task.cancel()
-            
-            # Calculate response time
-            response_time = (datetime.now() - game.round_start_time).total_seconds()
-            
-            # Add score
-            game.add_score(message.author.id, message.author.display_name, 1)
-            
-            # Get correct answer
-            song = game.current_song
-            correct_answer = self.format_answer(song, game.answer_type)
-            artist = song.get('artist', 'Unknown')
-            version = song.get('version', 'Unknown')
-            
-            # Send success message
-            embed = discord.Embed(
-                title="✅ Correct!",
-                description=f"**{message.author.mention}** got it in **{response_time:.2f}s**!",
-                color=discord.Color.gold()
-            )
-            embed.add_field(name="Answer", value=correct_answer, inline=False)
-            if game.answer_type == 'difficulty':
-                title_display = song.get('romaji') or song.get('title', 'Unknown')
-                embed.add_field(name="Title", value=title_display, inline=False)
-                embed.add_field(name="Artist", value=artist, inline=False)
-                embed.add_field(name="Version", value=version, inline=True)
-            else:
-                embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
-                embed.add_field(name="Version", value=version, inline=True)
-            if game.answer_type == 'title':
-                embed.add_field(name="Artist", value=artist, inline=False)
-            embed.add_field(name="Score", value=f"{game.scores[message.author.id]} point(s)", inline=True)
-            
-            # Add song image
-            image_path = get_song_image_path(song)
-            if image_path:
-                file = discord.File(image_path, filename="answer.png")
-                embed.set_thumbnail(url="attachment://answer.png")
-                await message.channel.send(embed=embed, file=file)
-            else:
-                await message.channel.send(embed=embed)
-            
-            # Wait before next round
-            await asyncio.sleep(3)
-            
-            # Check if game still exists before starting next round
-            if message.channel.id in self.active_games:
-                await self.start_round(message.channel)
+        try:
+            if check_answer(message.content, game.current_song, game.answer_type, aliases=game.current_aliases):
+                game.answered = True
+                
+                # Cancel timeout
+                if game.timeout_task:
+                    game.timeout_task.cancel()
+                
+                # Calculate response time
+                response_time = (datetime.now() - game.round_start_time).total_seconds()
+                
+                # Add score
+                game.add_score(message.author.id, message.author.display_name, 1)
+                
+                # Get correct answer
+                song = game.current_song
+                correct_answer = self.format_answer(song, game.answer_type)
+                artist = song.get('artist', 'Unknown')
+                version = song.get('version', 'Unknown')
+                
+                # Send success message
+                embed = discord.Embed(
+                    title="✅ Correct!",
+                    description=f"**{message.author.mention}** got it in **{response_time:.2f}s**!",
+                    color=discord.Color.gold()
+                )
+                embed.add_field(name="Answer", value=correct_answer, inline=False)
+                if game.answer_type == 'difficulty':
+                    title_display = song.get('romaji') or song.get('title', 'Unknown')
+                    embed.add_field(name="Title", value=title_display, inline=False)
+                    embed.add_field(name="Artist", value=artist, inline=False)
+                    embed.add_field(name="Version", value=version, inline=True)
+                else:
+                    embed.add_field(name="Difficulty", value=self.get_difficulty_display(song, mode=game.mode), inline=True)
+                    embed.add_field(name="Version", value=version, inline=True)
+                if game.answer_type == 'title':
+                    embed.add_field(name="Artist", value=artist, inline=False)
+                embed.add_field(name="Score", value=f"{game.scores[message.author.id]} point(s)", inline=True)
+                
+                # Add song image
+                image_path = get_song_image_path(song)
+                if image_path:
+                    try:
+                        file = discord.File(image_path, filename="answer.png")
+                        embed.set_thumbnail(url="attachment://answer.png")
+                        await message.channel.send(embed=embed, file=file)
+                    except Exception as img_err:
+                        print(f"Error sending correct answer image: {img_err}")
+                        embed.set_thumbnail(url=None)
+                        await message.channel.send(embed=embed)
+                else:
+                    await message.channel.send(embed=embed)
+                
+                # Wait before next round
+                await asyncio.sleep(3)
+                
+                # Check if game still exists before starting next round
+                if message.channel.id in self.active_games:
+                    await self.start_round(message.channel)
+        except Exception as e:
+            print(f"Error in on_message answer handling: {e}")
+            import traceback
+            traceback.print_exc()
+            await self.end_game(message.channel, cancelled=True)
     
     @app_commands.command(name="skip", description="Vote to skip the current song")
     async def skip(self, interaction: discord.Interaction):
