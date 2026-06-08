@@ -1545,6 +1545,16 @@ class QuizCog(commands.Cog):
             # Always remove game from active games and creating games
             self.active_games.pop(channel.id, None)
             self.creating_games.discard(channel.id)
+
+            # Check if any other active games need the chart renderer
+            chart_game_active = any(g.mode == 'chart' for g in self.active_games.values())
+            if not chart_game_active and self._chart_renderer is not None:
+                try:
+                    await self._chart_renderer.close()
+                except Exception as e:
+                    print(f"Error closing chart renderer on game end: {e}")
+                finally:
+                    self._chart_renderer = None
     
     async def start_game_with_config(self, channel: discord.TextChannel, host_id: int, config: dict):
         """Start a new game with the given config (used by Play Again button)."""

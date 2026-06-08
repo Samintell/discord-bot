@@ -308,8 +308,9 @@ class ChartRenderer:
         Returns:
             True on success
         """
+        images = []
+        smaller = []
         try:
-            images = []
             for frame_bytes in frames:
                 img = Image.open(io.BytesIO(frame_bytes)).convert("RGB")
                 images.append(img)
@@ -331,7 +332,6 @@ class ChartRenderer:
             # If too large for Discord (>8MB), halve the resolution
             file_size = output_path.stat().st_size
             if file_size > 8 * 1024 * 1024:
-                smaller = []
                 for img in images:
                     w, h = img.size
                     smaller.append(img.resize((w // 2, h // 2), Image.LANCZOS))
@@ -350,3 +350,15 @@ class ChartRenderer:
         except Exception as e:
             print(f"Error compiling GIF: {e}")
             return False
+        finally:
+            # Explicitly close Image objects to release C-level memory buffers immediately
+            for img in images:
+                try:
+                    img.close()
+                except Exception:
+                    pass
+            for img in smaller:
+                try:
+                    img.close()
+                except Exception:
+                    pass
