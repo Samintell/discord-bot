@@ -69,21 +69,25 @@ class ChartRenderer:
             await self.initialize()
 
         self._page = await self._browser.new_page(
-            viewport={"width": CANVAS_SIZE + 50, "height": CANVAS_SIZE + 200}
+            viewport={"width": 600, "height": 800}
         )
         await self._page.goto(PLAYER_URL, wait_until="networkidle", timeout=30000)
         await asyncio.sleep(1)
 
-        # Resize the canvas once so all future captures are small
-        await self._page.evaluate(f"""(() => {{
-            const canvas = document.querySelector('#chartCanvas');
-            if (canvas) {{
-                canvas.width = {CANVAS_SIZE};
-                canvas.height = {CANVAS_SIZE};
-                canvas.style.width = '{CANVAS_SIZE}px';
-                canvas.style.height = '{CANVAS_SIZE}px';
-            }}
-        }})()""")
+        # Disable unnecessary hints via UI checkboxes to hide BPM, notes, and break counts
+        await self._page.evaluate("""(() => {
+            const hideSetting = (id) => {
+                const el = document.querySelector(id);
+                if (el && el.checked) {
+                    el.checked = false;
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+            };
+            hideSetting('#showBpm');
+            hideSetting('#showNoteTotal');
+            hideSetting('#showBreakCount');
+            hideSetting('#showBreakIndex');
+        })()""")
 
         return self._page
 
@@ -129,8 +133,8 @@ class ChartRenderer:
         if not chart_notation:
             return None
 
-        # Pick random start position (10%-80% through the chart)
-        start_fraction = random.uniform(0.1, 0.8)
+        # Pick random start position (0%-90% through the chart)
+        start_fraction = random.uniform(0.0, 0.9)
 
         try:
             page = await self._get_page()
@@ -255,6 +259,29 @@ class ChartRenderer:
                     window.__virtualTime += {frame_interval_ms};
                     return new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => {{
                         const c = document.querySelector('#chartCanvas');
+                        const ctx = c.getContext('2d');
+                        
+                        // Calculate percentage
+                        const slider = document.querySelector('#measureSlider');
+                        const cur = parseInt(slider.value) || 0;
+                        const max = parseInt(slider.max) || 100;
+                        let pct = Math.floor((cur / max) * 100);
+                        if (pct < 0) pct = 0;
+                        if (pct > 100) pct = 100;
+                        
+                        // Draw percentage text on the canvas
+                        ctx.save();
+                        ctx.fillStyle = '#fff';
+                        ctx.strokeStyle = '#000';
+                        ctx.lineWidth = 4;
+                        ctx.font = 'bold 24px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'top';
+                        const text = pct + '%';
+                        ctx.strokeText(text, c.width / 2, 20);
+                        ctx.fillText(text, c.width / 2, 20);
+                        ctx.restore();
+                        
                         r(c.toDataURL('image/jpeg', 0.7));
                     }})));
                 }})()"""
