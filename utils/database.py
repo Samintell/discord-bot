@@ -1,5 +1,6 @@
 """
-SQLite database manager for maimai NET user tokens and cached scores.
+SQLite database manager for maimai NET cached scores and user profiles.
+Auth tokens and login credentials live in segaid_accounts.db (utils/segaid_db.py).
 Uses aiosqlite for async access and Fernet for token encryption.
 """
 
@@ -31,15 +32,6 @@ def _get_fernet() -> Fernet:
 async def init_db() -> None:
     """Create database tables if they don't exist."""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS user_tokens (
-                discord_user_id TEXT NOT NULL,
-                encrypted_token TEXT NOT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (discord_user_id)
-            )
-        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_scores (
                 discord_user_id TEXT NOT NULL,
@@ -88,48 +80,6 @@ async def init_db() -> None:
             pass # Column already exists
             
         await db.commit()
-
-
-# --- Token operations ---
-
-async def save_token(discord_user_id: str, token: str) -> None:
-    """Encrypt and store a maimai NET token for a user."""
-    f = _get_fernet()
-    encrypted = f.encrypt(token.encode()).decode()
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
-            INSERT INTO user_tokens (discord_user_id, encrypted_token, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(discord_user_id) DO UPDATE SET
-                encrypted_token = excluded.encrypted_token,
-                updated_at = CURRENT_TIMESTAMP
-        """, (discord_user_id, encrypted))
-        await db.commit()
-
-
-async def get_token(discord_user_id: str) -> Optional[str]:
-    """Retrieve and decrypt a user's maimai NET token."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT encrypted_token FROM user_tokens WHERE discord_user_id = ?",
-            (discord_user_id,)
-        )
-        row = await cursor.fetchone()
-        if not row:
-            return None
-        f = _get_fernet()
-        return f.decrypt(row[0].encode()).decode()
-
-
-async def delete_token(discord_user_id: str) -> bool:
-    """Remove a user's stored token. Returns True if a token was deleted."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "DELETE FROM user_tokens WHERE discord_user_id = ?",
-            (discord_user_id,)
-        )
-        await db.commit()
-        return cursor.rowcount > 0
 
 
 # --- Score operations ---

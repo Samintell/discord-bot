@@ -8,6 +8,25 @@ PROJECT_ROOT = Path(__file__).parent.parent
 IMAGES_DIR = PROJECT_ROOT / "images"
 SHOP_ASSETS_DIR = PROJECT_ROOT / "assets" / "shop"
 
+# Canvas is rendered natively at final output size (no upscaling).
+# Layout was previously designed at 1250x2020 then resized x1.5; these
+# values are that design space hardcoded at 1.5x scale.
+CANVAS_W, CANVAS_H = 1875, 3030
+HEADER_H = 450
+NAME_RECT = (105, 105, 1200, 360)
+AVATAR_RECT = (165, 143, 345, 323)
+USER_POS = (375, 135)
+RATE_RECT = (375, 218, 975, 335)
+NEW_TITLE_POS = (75, 470)
+OLD_TITLE_POS = (75, 1281)
+PANEL_W, PANEL_H = 315, 195
+GAP = 37
+GRID_X = 75
+NEW_GRID_Y = 555
+OLD_GRID_Y = 1356
+TOP15_ROWS, TOP35_ROWS = 3, 7
+COLS = 5
+
 def get_rating_color(rating: int) -> str:
     if rating >= 15000: return "rainbow"
     if rating >= 14500: return "platinum"
@@ -95,8 +114,8 @@ class B50Renderer:
         self.banner_id = banner_id
         self.partner_id = partner_id
         
-        self.width = 1250
-        self.height = 2020
+        self.width = CANVAS_W
+        self.height = CANVAS_H
         self.bg_color = (250, 250, 250)
 
     def _draw_song_panel(self, song: Dict, width: int, height: int) -> Image.Image:
@@ -147,9 +166,9 @@ class B50Renderer:
             title = song["romaji"]
             
         # Draw Title
-        title_font = get_font(18, bold=True)
-        title_disp = truncate_text(draw, title, title_font, width - 10)
-        draw.text((5, 5), title_disp, font=title_font, fill=(255, 255, 255))
+        title_font = get_font(27, bold=True)
+        title_disp = truncate_text(draw, title, title_font, width - 15)
+        draw.text((8, 8), title_disp, font=title_font, fill=(255, 255, 255))
         
         # Difficulty and Type indicator
         diff_colors = {
@@ -163,15 +182,15 @@ class B50Renderer:
         color = diff_colors.get(diff, (255, 255, 255))
         
         type_str = song.get("chart_type", "std").upper()
-        draw.rectangle([5, 30, 48, 50], fill=color, outline=(0,0,0), width=1)
-        type_font = get_font(16, bold=True, family="english")
+        draw.rectangle([8, 45, 72, 75], fill=color, outline=(0,0,0), width=2)
+        type_font = get_font(24, bold=True, family="english")
         text_color = (0, 0, 0) if diff == "remaster" or diff == "advanced" else (255, 255, 255)
-        draw.text((10, 31), type_str, font=type_font, fill=text_color)
+        draw.text((15, 47), type_str, font=type_font, fill=text_color)
         
         # Bottom left: Achievement and Rank
         achieve = f"{song.get('achievement', 0):.4f}%"
-        achieve_font = get_font(18, bold=True, family="english")
-        draw.text((5, height - 26), achieve, font=achieve_font, fill=(255, 255, 255))
+        achieve_font = get_font(27, bold=True, family="english")
+        draw.text((8, height - 39), achieve, font=achieve_font, fill=(255, 255, 255))
         
         # Render Rank text based on achievement
         rank = ""
@@ -186,13 +205,13 @@ class B50Renderer:
         elif a >= 90.0: rank = "AA"
         elif a >= 80.0: rank = "A"
         
-        rank_font = get_font(32, bold=True, family="english")
+        rank_font = get_font(48, bold=True, family="english")
         rank_color = (255, 215, 0) if "S" in rank else (220, 220, 220)
-        draw.text((5, height - 62), rank, font=rank_font, fill=rank_color)
+        draw.text((8, height - 93), rank, font=rank_font, fill=rank_color)
         
         # Bottom right: Rating
         rating = str(song.get("rating", 0))
-        rating_font = get_font(38, bold=True, family="english")
+        rating_font = get_font(57, bold=True, family="english")
         
         def get_width(f, t):
             if hasattr(f, 'getbbox'):
@@ -201,16 +220,16 @@ class B50Renderer:
                 return f.getsize(t)[0]
                 
         r_w = get_width(rating_font, rating)
-        draw.text((width - r_w - 8, height - 45), rating, font=rating_font, fill=(255, 255, 255))
+        draw.text((width - r_w - 12, height - 68), rating, font=rating_font, fill=(255, 255, 255))
         
         # Level text above rating
         level_str = str(song.get("level", 0))
-        level_font = get_font(20, bold=True, family="english")
+        level_font = get_font(30, bold=True, family="english")
         l_w = get_width(level_font, level_str)
-        draw.text((width - l_w - 8, height - 70), level_str, font=level_font, fill=(255, 255, 255))
+        draw.text((width - l_w - 12, height - 105), level_str, font=level_font, fill=(255, 255, 255))
         
         # Draw a neat border around the whole panel
-        draw.rectangle([0, 0, width-1, height-1], outline=(200, 200, 200), width=1)
+        draw.rectangle([0, 0, width-1, height-1], outline=(200, 200, 200), width=2)
         
         return panel
 
@@ -219,7 +238,7 @@ class B50Renderer:
         draw = ImageDraw.Draw(img)
         
         # Draw Banner / Background header
-        header_height = 300
+        header_height = HEADER_H
         if self.banner_id:
             # We don't have local banner assets yet unless we load from a URL or static dir
             # For now, let's draw a gradient or placeholder
@@ -228,26 +247,26 @@ class B50Renderer:
         draw.rectangle([0, 0, self.width, header_height], fill=(240, 210, 230))
         
         # Draw white background wrapper for nameplate
-        # Covers from 70,70 to 800, 240
-        draw.rounded_rectangle([70, 70, 800, 240], radius=15, fill=(255, 255, 255))
+        # Covers from 105,105 to 1200, 360
+        draw.rounded_rectangle(NAME_RECT, radius=23, fill=(255, 255, 255))
         
         # User Avatar
         if self.avatar_bytes:
             avatar_img = Image.open(io.BytesIO(self.avatar_bytes)).convert("RGBA")
-            avatar_img = avatar_img.resize((120, 120), Image.LANCZOS)
+            avatar_img = avatar_img.resize((180, 180), Image.LANCZOS)
             
             # Mask to circle
-            mask = Image.new('L', (120, 120), 0)
+            mask = Image.new('L', (180, 180), 0)
             draw_mask = ImageDraw.Draw(mask)
-            draw_mask.ellipse((0, 0, 120, 120), fill=255)
+            draw_mask.ellipse((0, 0, 180, 180), fill=255)
             
-            img.paste(avatar_img, (110, 95), mask)
+            img.paste(avatar_img, (165, 143), mask)
         else:
-            draw.ellipse((110, 95, 230, 215), fill=(100, 100, 100))
+            draw.ellipse(AVATAR_RECT, fill=(100, 100, 100))
             
         # Draw user name
-        user_font = get_font(42, bold=True)
-        draw.text((250, 90), self.username, font=user_font, fill=(50, 50, 50))
+        user_font = get_font(63, bold=True)
+        draw.text(USER_POS, self.username, font=user_font, fill=(50, 50, 50))
         
         # Draw rating plate
         rating_color = get_rating_color(self.total_rating)
@@ -255,10 +274,10 @@ class B50Renderer:
             rating_base = Image.open(PROJECT_ROOT / "assets" / "rating" / f"{rating_color}.webp").convert("RGBA")
             # Original rating plate is 664x130. Scale down to fit.
             w, h = rating_base.size
-            new_w = 400
-            new_h = int(h * (new_w / w)) # ~78
+            new_w = 600
+            new_h = int(h * (new_w / w)) # ~117
             rating_base = rating_base.resize((new_w, new_h), Image.LANCZOS)
-            img.paste(rating_base, (250, 145), rating_base)
+            img.paste(rating_base, (375, 218), rating_base)
             
             # Put the text directly on top of the plate, aligning each digit perfectly in its box
             rating_str = str(self.total_rating)
@@ -268,13 +287,13 @@ class B50Renderer:
             used_centers = original_centers[-len(rating_str):]
             
             # The Y center of the boxes in the original 664x130 image is at Y=54
-            center_y = 145 + (54 * (new_h / h))
+            center_y = 218 + (54 * (new_h / h))
             
             for i, digit in enumerate(rating_str):
-                center_x = 250 + (used_centers[i] * (new_w / w))
-                
+                center_x = 375 + (used_centers[i] * (new_w / w))
+            
             # Put the text directly on top of the plate, aligning each digit perfectly in its box
-            total_font = get_font(36, bold=True, family="english")
+            total_font = get_font(54, bold=True, family="english")
             rating_str = str(self.total_rating)
             
             # The X centers of the 5 digit boxes in the original 664px image
@@ -282,11 +301,11 @@ class B50Renderer:
             used_centers = original_centers[-len(rating_str):]
             
             # The Y center of the boxes in the original 664x130 image is at Y=54
-            # We add +6 to shift the numbers slightly down based on visual feedback
-            center_y = 145 + (54 * (new_h / h)) + 6
+            # We add +9 to shift the numbers slightly down based on visual feedback
+            center_y = 218 + (54 * (new_h / h)) + 9
             
             for i, digit in enumerate(rating_str):
-                center_x = 250 + (used_centers[i] * (new_w / w))
+                center_x = 375 + (used_centers[i] * (new_w / w))
                 
                 if hasattr(total_font, 'getbbox'):
                     bbox = total_font.getbbox(digit)
@@ -304,47 +323,42 @@ class B50Renderer:
                 draw.text((draw_x, draw_y), digit, font=total_font, fill=(255, 255, 255))
         except Exception as e:
             # Fallback if image fails
-            total_font = get_font(36, bold=True, family="english")
-            draw.text((250, 150), f"Rating: {self.total_rating}", font=total_font, fill=(255, 215, 0))
+            total_font = get_font(54, bold=True, family="english")
+            draw.text((375, 225), f"Rating: {self.total_rating}", font=total_font, fill=(255, 215, 0))
         
         # Draw New Charts Section
-        section_font = get_font(30, bold=True, family="english")
-        draw.text((50, header_height + 20), f"NEW CHARTS (Top 15) - Total: {sum(s['rating'] for s in self.top_15)}", font=section_font, fill=(50, 150, 200))
+        section_font = get_font(45, bold=True, family="english")
+        draw.text(NEW_TITLE_POS, f"NEW CHARTS (Top 15) - Total: {sum(s['rating'] for s in self.top_15)}", font=section_font, fill=(50, 150, 200))
         
-        panel_w = 210
-        panel_h = 130
-        gap_x = 25
-        gap_y = 25
+        panel_w = PANEL_W
+        panel_h = PANEL_H
+        gap_x = GAP
+        gap_y = GAP
         
-        start_y = header_height + 70
-        start_x = 50
+        start_y = NEW_GRID_Y
+        start_x = GRID_X
         
         for i, song in enumerate(self.top_15):
-            row = i // 5
-            col = i % 5
+            row = i // COLS
+            col = i % COLS
             x = start_x + col * (panel_w + gap_x)
             y = start_y + row * (panel_h + gap_y)
             panel = self._draw_song_panel(song, panel_w, panel_h)
             img.paste(panel, (x, y))
             
         # Draw Old Charts Section
-        old_start_y = start_y + 3 * (panel_h + gap_y) + 20
-        draw.text((50, old_start_y), f"OLD CHARTS (Top 35) - Total: {sum(s['rating'] for s in self.top_35)}", font=section_font, fill=(180, 80, 150))
+        old_start_y = start_y + TOP15_ROWS * (panel_h + gap_y) + 30
+        draw.text(OLD_TITLE_POS, f"OLD CHARTS (Top 35) - Total: {sum(s['rating'] for s in self.top_35)}", font=section_font, fill=(180, 80, 150))
         
-        old_grid_y = old_start_y + 50
+        old_grid_y = OLD_GRID_Y
         for i, song in enumerate(self.top_35):
-            row = i // 5
-            col = i % 5
+            row = i // COLS
+            col = i % COLS
             x = start_x + col * (panel_w + gap_x)
             y = old_grid_y + row * (panel_h + gap_y)
             panel = self._draw_song_panel(song, panel_w, panel_h)
             img.paste(panel, (x, y))
 
-        # Scale up the final image to make it bigger overall
-        new_width = int(self.width * 1.5)
-        new_height = int(self.height * 1.5)
-        img = img.resize((new_width, new_height), Image.LANCZOS)
-        
         # Output to bytes
         img_bytes = io.BytesIO()
         img.save(img_bytes, format='PNG')

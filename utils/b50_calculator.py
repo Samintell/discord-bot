@@ -1,7 +1,8 @@
 import math
 import asyncio
 from typing import Dict, List, Tuple
-from utils.database import get_token, save_scores
+from utils.database import save_scores
+from utils.segaid_db import get_token
 from utils.maimai_scraper import fetch_all_scores, match_scores_to_songs
 from utils.song_loader import _get_all_songs
 from utils.config_manager import get_b50_active_versions
@@ -14,7 +15,7 @@ VERSION_ORDER = [
     "PiNK", "PiNK PLUS", "MURASAKi", "MURASAKi PLUS", "MiLK", "MiLK PLUS",
     "FiNALE", "maimaiでらっくす", "maimaiでらっくす PLUS", "Splash", "Splash PLUS",
     "UNiVERSE", "UNiVERSE PLUS", "FESTiVAL", "FESTiVAL PLUS", "BUDDiES",
-    "BUDDiES PLUS", "PRiSM", "PRiSM PLUS"
+    "BUDDiES PLUS", "PRiSM", "PRiSM PLUS", "CiRCLE", "CiRCLE PLUS"
 ]
 
 def get_rating_coefficient(achievement: float) -> float:

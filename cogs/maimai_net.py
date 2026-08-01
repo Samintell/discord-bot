@@ -7,11 +7,79 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 
-from utils.database import save_token, get_token, delete_token, save_scores, delete_scores, has_scores, get_score_summary, get_profile, set_user_language
+from utils.database import save_scores, delete_scores, has_scores, get_score_summary, get_profile, set_user_language
 from utils.maimai_scraper import validate_token, fetch_all_scores, match_scores_to_songs
+from utils.segaid_db import save_token, get_token, delete_token, save_segaid_account, delete_segaid_account
+from utils.segaid_login import login_with_segaid, try_refresh_with_segaid
 from utils.b50_calculator import B50Calculator
 from utils.b50_renderer import B50Renderer
 import discord.app_commands as app_commands
+
+
+class SegaIDLoginModal(discord.ui.Modal):
+    """Modal for entering SEGA ID credentials.
+
+    Not the recommended login method - using /login with a clal cookie is
+    safer because the cookie can be revoked without exposing your password.
+    """
+
+    username = discord.ui.TextInput(
+        label="SEGA ID Username",
+        placeholder="Enter your SEGA ID username",
+        max_length=64,
+    )
+    password = discord.ui.TextInput(
+        label="SEGA ID Password (not recommended)",
+        placeholder="Recommended: use /login with your clal cookie instead",
+        max_length=128,
+    )
+
+    def __init__(self):
+        super().__init__(title="SEGA ID Login (Not Recommended)")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        """Perform the SEGA ID login with the entered credentials."""
+        # Always respond ephemerally so credentials are never visible to others
+        await interaction.response.defer(ephemeral=True)
+
+        username = self.username.value.strip()
+        password = self.password.value
+        user_id = str(interaction.user.id)
+
+        # Log in via the SEGA ID auth gateway and get a clal session cookie
+        ok, message, clal = await login_with_segaid(username, password)
+        if not ok or not clal:
+            await interaction.followup.send(f"Login failed: {message}", ephemeral=True)
+            return
+
+        # Validate the session and get the player name
+        is_valid, validate_msg = await validate_token(clal)
+        if not is_valid:
+            await interaction.followup.send(f"Login failed: {validate_msg}", ephemeral=True)
+            return
+
+        try:
+            await save_token(user_id, clal)
+            await save_segaid_account(user_id, username, password)
+        except RuntimeError as e:
+            await interaction.followup.send(
+                f"Configuration error: {e}\nThe bot owner needs to set TOKEN_SECRET in the .env file.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(
+            title="SEGA ID Linked",
+            description=(
+                f"{validate_msg}\n\n"
+                f"Your SEGA ID login is stored encrypted in a separate database and your "
+                f"session has been saved. Run `/fetch` to download your scores.\n\n"
+                f"If your session expires, the bot can refresh it automatically with `/fetch`."
+            ),
+            color=discord.Color.green(),
+        )
+        embed.set_footer(text="Your password is encrypted and never visible to others.")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 class MaimaiNetCog(commands.Cog):
@@ -20,15 +88,30 @@ class MaimaiNetCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="loginhelp", description="How to find your maimai NET cookie for /login")
+    @app_commands.command(name="loginhelp", description="How to link your maimai NET account")
     async def loginhelp(self, interaction: discord.Interaction):
-        """Show instructions for obtaining the clal cookie."""
+        """Show instructions for linking a maimai NET account."""
         embed = discord.Embed(
             title="How to Link Your maimai NET Account",
-            description="Follow these steps to get your `clal` cookie:",
+            description="There are two ways to link your account:",
             color=discord.Color.blue(),
         )
 
+        embed.add_field(
+            name="Option 1: SEGA ID Login (Not Recommended)",
+            value=(
+                "Run `/login_segaid` and enter your SEGA ID **username** and **password** "
+                "in the popup window.\n"
+                "**Not recommended** - use Option 2 (clal cookie) whenever possible. "
+                "A cookie can be revoked without exposing your password."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Option 2: clal Cookie",
+            value="Follow the steps below to get your `clal` cookie instead:",
+            inline=False,
+        )
         embed.add_field(
             name="Step 1: Log in to maimai NET",
             value="Go to [maimaidx-eng.com](https://maimaidx-eng.com/) and log in with your SEGA ID.",
@@ -58,7 +141,7 @@ class MaimaiNetCog(commands.Cog):
             inline=False,
         )
 
-        embed.set_footer(text="Your token is stored encrypted and never shared. Use /logout to remove it.")
+        embed.set_footer(text="Login data is stored encrypted and never shared. Use /logout to remove it.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @app_commands.command(name="login", description="Link your maimai NET (International) account using your clal cookie")
@@ -101,6 +184,11 @@ class MaimaiNetCog(commands.Cog):
         embed.set_footer(text="Your token is stored encrypted and is never visible to others.")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @app_commands.command(name="login_segaid", description="Link your maimai NET account with SEGA ID (not recommended - use /login instead)")
+    async def login_segaid(self, interaction: discord.Interaction):
+        """Open a modal to enter SEGA ID credentials."""
+        await interaction.response.send_modal(SegaIDLoginModal())
+
     @app_commands.command(name="logout", description="Unlink your maimai NET account and remove stored data")
     async def logout(self, interaction: discord.Interaction):
         """Remove stored token and cached scores."""
@@ -109,15 +197,16 @@ class MaimaiNetCog(commands.Cog):
         user_id = str(interaction.user.id)
         token_deleted = await delete_token(user_id)
         await delete_scores(user_id)
+        segaid_deleted = await delete_segaid_account(user_id)
 
-        if token_deleted:
+        if token_deleted or segaid_deleted:
             await interaction.followup.send(
-                "Your maimai NET token and cached scores have been removed.",
+                "Your maimai NET session, SEGA ID login, and cached scores have been removed.",
                 ephemeral=True,
             )
         else:
             await interaction.followup.send(
-                "No linked account found. Use `/login` to link your maimai NET account.",
+                "No linked account found. Use `/login` or `/login_segaid` to link your maimai NET account.",
                 ephemeral=True,
             )
 
@@ -152,18 +241,32 @@ class MaimaiNetCog(commands.Cog):
             progress_parts.append(f"{diff_name}: {count} scores")
 
         # Fetch scores
+        raw_scores = []
+        fetch_error = None
         try:
             raw_scores = await fetch_all_scores(token, on_progress=on_progress)
         except Exception as e:
+            fetch_error = e
+
+        # If the session expired, try refreshing automatically via SEGA ID login
+        refreshed = False
+        if not raw_scores:
+            new_token = await try_refresh_with_segaid(user_id)
+            if new_token:
+                progress_parts = []
+                raw_scores = await fetch_all_scores(new_token, on_progress=on_progress)
+                refreshed = True
+
+        if fetch_error and not raw_scores:
             await interaction.followup.send(
-                f"Error fetching scores: {e}\nYour token may have expired. Try `/login` with a fresh cookie.",
+                f"Error fetching scores: {fetch_error}\nYour token may have expired. Try `/login` with a fresh cookie.",
                 ephemeral=True,
             )
             return
 
         if not raw_scores:
             await interaction.followup.send(
-                "No scores found. Your token may have expired. Try `/login` with a fresh cookie.",
+                "No scores found. Your token may have expired. Try `/login` or `/login_segaid`.",
                 ephemeral=True,
             )
             return
@@ -177,9 +280,12 @@ class MaimaiNetCog(commands.Cog):
         # Build summary
         embed = discord.Embed(
             title="Scores Fetched",
-            description=f"Successfully fetched your maimai NET scores.",
+            description="Successfully fetched your maimai NET scores.",
             color=discord.Color.green(),
         )
+
+        if refreshed:
+            embed.add_field(name="Session Refreshed", value="Your expired session was renewed automatically via SEGA ID login.", inline=False)
 
         progress_text = "\n".join(progress_parts) if progress_parts else "No data"
         embed.add_field(name="Fetched", value=progress_text, inline=False)

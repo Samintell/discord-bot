@@ -56,6 +56,14 @@ async def setup_hook():
     except Exception as e:
         print(f"Warning: Failed to initialize maimai database: {e}")
 
+    # Initialize the separate SEGA ID login database
+    try:
+        from utils.segaid_db import init_segaid_db
+        await init_segaid_db()
+        print("Initialized SEGA ID login database")
+    except Exception as e:
+        print(f"Warning: Failed to initialize SEGA ID login database: {e}")
+
     try:
         await bot.load_extension('cogs.quiz')
         print("Loaded quiz cog")

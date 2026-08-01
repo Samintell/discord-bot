@@ -207,7 +207,10 @@ def main():
             continue
         
         # Create search query (prefer original title for better YouTube results)
-        search_query = f"{title} {artist}"
+        # Strip dashes and quotes - YouTube treats '-' as an exclude operator
+        # and '"' as an exact-phrase operator (e.g. "-OutsideR_RequieM-")
+        search_query = f"{title} {artist}".replace("-", " ").replace('"', "").replace("\u201c", "").replace("\u201d", "")
+        search_query = " ".join(search_query.split())
         print(f"  🔍 Searching: {search_query}")
         
         # Search YouTube
