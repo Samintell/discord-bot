@@ -16,6 +16,7 @@ from utils.config_manager import (
     load_translations, add_translation, remove_translation,
     load_romaji_overrides, add_romaji_override, remove_romaji_override,
     load_aliases, add_alias, remove_alias,
+    get_b50_active_versions, set_b50_active_versions
 )
 from utils.admin_signals import emit_admin_signal
 from utils.song_loader import _get_all_songs, clear_song_cache
@@ -577,6 +578,42 @@ class AdminCog(commands.Cog):
                 f"**Error running scripts/convert_data.py:** {e}",
                 ephemeral=True,
             )
+
+    # ==================== B50 COMMANDS ====================
+
+    b50_group = app_commands.Group(
+        name="b50_admin",
+        description="Manage B50 configuration (admin only)",
+        default_permissions=discord.Permissions()
+    )
+
+    @b50_group.command(name="set_versions", description="Set the versions considered 'New' for B50")
+    @app_commands.describe(
+        version_1="First version string (e.g. PRiSM)",
+        version_2="Second version string (e.g. PRiSM PLUS, optional)"
+    )
+    @is_admin()
+    async def b50_set_versions(self, interaction: discord.Interaction, version_1: str, version_2: Optional[str] = None):
+        versions = [version_1]
+        if version_2:
+            versions.append(version_2)
+            
+        set_b50_active_versions(versions)
+        
+        await interaction.response.send_message(
+            f"**B50 'New' versions set to:** {', '.join(versions)}",
+            ephemeral=True
+        )
+
+    @b50_group.command(name="clear_versions", description="Clear configured 'New' versions to use dynamic detection")
+    @is_admin()
+    async def b50_clear_versions(self, interaction: discord.Interaction):
+        set_b50_active_versions([])
+        
+        await interaction.response.send_message(
+            "**B50 'New' versions cleared.** Now using dynamic detection.",
+            ephemeral=True
+        )
 
     # ==================== ERROR HANDLING ====================
 

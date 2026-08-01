@@ -7,8 +7,11 @@ from discord import app_commands
 from discord.ext import commands
 from typing import Optional
 
-from utils.database import save_token, get_token, delete_token, save_scores, delete_scores, has_scores, get_score_summary
+from utils.database import save_token, get_token, delete_token, save_scores, delete_scores, has_scores, get_score_summary, get_profile, set_user_language
 from utils.maimai_scraper import validate_token, fetch_all_scores, match_scores_to_songs
+from utils.b50_calculator import B50Calculator
+from utils.b50_renderer import B50Renderer
+import discord.app_commands as app_commands
 
 
 class MaimaiNetCog(commands.Cog):
@@ -233,6 +236,83 @@ class MaimaiNetCog(commands.Cog):
 
         embed.set_footer(text="Ranks show songs at or above that rank on Expert/Master/Remaster")
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @app_commands.command(name="b50", description="Generate your maimai DX best 50 rating chart")
+    @app_commands.describe(
+        language="Optional: Override your preferred song title language for this chart"
+    )
+    @app_commands.choices(language=[
+        app_commands.Choice(name="Japanese", value="japanese"),
+        app_commands.Choice(name="Romaji", value="romaji"),
+        app_commands.Choice(name="English", value="english")
+    ])
+    async def b50(self, interaction: discord.Interaction, language: Optional[discord.app_commands.Choice[str]] = None):
+        """Generate and display the user's best 50 scores."""
+        await interaction.response.defer(ephemeral=False)
+        
+        user_id = str(interaction.user.id)
+        
+        # Load user profile for language, banner, partner
+        profile = await get_profile(user_id)
+        
+        pref_language = language.value if language else profile.get("name_language", "japanese")
+        banner_id = profile.get("banner_id")
+        partner_id = profile.get("partner_id")
+        
+        # Calculate B50
+        calculator = B50Calculator(user_id)
+        top_15, top_35, total_rating = await calculator.get_b50()
+        
+        if not top_15 and not top_35:
+            await interaction.followup.send("No scores found! Please use `/login` and `/fetch` first to download your scores.", ephemeral=True)
+            return
+            
+        # Get user avatar
+        avatar_bytes = None
+        if interaction.user.display_avatar:
+            try:
+                avatar_bytes = await interaction.user.display_avatar.read()
+            except Exception:
+                pass
+                
+        # Render image
+        username = interaction.user.display_name
+        renderer = B50Renderer(
+            username=username,
+            language=pref_language,
+            top_15=top_15,
+            top_35=top_35,
+            total_rating=total_rating,
+            avatar_bytes=avatar_bytes,
+            banner_id=banner_id,
+            partner_id=partner_id
+        )
+        
+        img_buffer = renderer.render()
+        
+        file = discord.File(fp=img_buffer, filename="b50.png")
+        
+        msg = ""
+        if calculator.used_cache and calculator.error_message:
+            msg = f"⚠️ *{calculator.error_message}*"
+            
+        await interaction.followup.send(content=msg, file=file)
+
+    # Note: If this is an existing cog with other commands, a command group might be better for settings.
+    # We will just add a settings command here for language.
+    @app_commands.command(name="set_language", description="Set your preferred language for song titles")
+    @app_commands.choices(language=[
+        app_commands.Choice(name="Japanese", value="japanese"),
+        app_commands.Choice(name="Romaji", value="romaji"),
+        app_commands.Choice(name="English", value="english")
+    ])
+    async def set_language(self, interaction: discord.Interaction, language: app_commands.Choice[str]):
+        """Set preferred language for song titles."""
+        await interaction.response.defer(ephemeral=True)
+        user_id = str(interaction.user.id)
+        
+        await set_user_language(user_id, language.value)
+        await interaction.followup.send(f"Successfully set your preferred language to **{language.name}**.", ephemeral=True)
 
 
 async def setup(bot):

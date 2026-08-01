@@ -15,6 +15,7 @@ CONFIG_DIR.mkdir(exist_ok=True)
 TRANSLATIONS_FILE = CONFIG_DIR / "known_translations.json"
 ROMAJI_FILE = CONFIG_DIR / "romaji_overrides.json"
 ALIASES_FILE = CONFIG_DIR / "aliases.json"
+B50_SETTINGS_FILE = CONFIG_DIR / "b50_settings.json"
 
 
 def _load_json(path: Path) -> dict:
@@ -104,3 +105,15 @@ def remove_alias(song_id: str, alias: str) -> bool:
 
 def get_aliases_for_song(song_id: str) -> List[str]:
     return load_aliases().get(song_id, [])
+
+# --- B50 Settings ---
+
+def get_b50_active_versions() -> List[str]:
+    """Get the manually configured 'New' versions for B50, if any."""
+    return _load_json(B50_SETTINGS_FILE).get("new_versions", [])
+
+def set_b50_active_versions(versions: List[str]) -> None:
+    """Set the 'New' versions for B50."""
+    data = _load_json(B50_SETTINGS_FILE)
+    data["new_versions"] = versions
+    _save_json(B50_SETTINGS_FILE, data)
