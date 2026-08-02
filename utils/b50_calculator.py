@@ -51,10 +51,20 @@ class B50Calculator:
         self.used_cache = False
         self.error_message = None
 
-    async def get_b50(self) -> Tuple[List[Dict], List[Dict], int]:
+    async def get_b50(
+        self,
+        on_progress=None,
+        on_fetch_complete=None,
+    ) -> Tuple[List[Dict], List[Dict], int]:
         """
         Fetches scores, calculates ratings, and returns:
         (top_15_new, top_35_old, total_rating)
+
+        Args:
+            on_progress: Optional async callback(difficulty_name, count) called
+                         after each difficulty page is fetched.
+            on_fetch_complete: Optional async callback() called once fetching
+                               finishes (or is skipped due to cached data).
         """
         token = None
         try:
@@ -66,7 +76,7 @@ class B50Calculator:
         if token:
             try:
                 # We can't use progress callbacks easily here as we just want silent fetching
-                raw_scores = await fetch_all_scores(token)
+                raw_scores = await fetch_all_scores(token, on_progress=on_progress)
                 if raw_scores:
                     matched_scores, _ = match_scores_to_songs(raw_scores)
                     await save_scores(self.discord_user_id, matched_scores)
@@ -79,7 +89,10 @@ class B50Calculator:
                 self.error_message = f"Failed to fetch from maimai NET ({e}), using cached data."
         else:
             self.used_cache = True
-        
+
+        if on_fetch_complete:
+            await on_fetch_complete()
+
         if not scores:
             # Fallback to local DB
             async with aiosqlite.connect(DB_PATH) as db:

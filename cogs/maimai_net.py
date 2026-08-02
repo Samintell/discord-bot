@@ -6,6 +6,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from typing import Optional
+import time
 
 from utils.database import save_scores, delete_scores, has_scores, get_score_summary, get_profile, set_user_language
 from utils.maimai_scraper import validate_token, fetch_all_scores, match_scores_to_songs
@@ -85,8 +86,28 @@ class SegaIDLoginModal(discord.ui.Modal):
 class MaimaiNetCog(commands.Cog):
     """Commands for linking maimai NET account and managing play data."""
 
+    COOLDOWN_SECONDS = 30
+
     def __init__(self, bot):
         self.bot = bot
+        self._last_used: dict[str, float] = {}
+
+    def _check_cooldown(self, user_id: str) -> bool:
+        """Return True if the user is on cooldown, otherwise record the call."""
+        now = time.monotonic()
+        last = self._last_used.get(user_id)
+        if last is not None and now - last < self.COOLDOWN_SECONDS:
+            return True
+        self._last_used[user_id] = now
+        return False
+
+    def _cooldown_remaining(self, user_id: str) -> int:
+        """Return seconds remaining on the cooldown for a user."""
+        last = self._last_used.get(user_id)
+        if last is None:
+            return 0
+        remaining = self.COOLDOWN_SECONDS - (time.monotonic() - last)
+        return max(0, int(remaining) + 1)
 
     @app_commands.command(name="loginhelp", description="How to link your maimai NET account")
     async def loginhelp(self, interaction: discord.Interaction):
@@ -213,9 +234,17 @@ class MaimaiNetCog(commands.Cog):
     @app_commands.command(name="fetch", description="Fetch your latest scores from maimai NET")
     async def fetch(self, interaction: discord.Interaction):
         """Fetch scores from maimai NET and cache them locally."""
-        await interaction.response.defer(ephemeral=True)
-
         user_id = str(interaction.user.id)
+
+        if self._check_cooldown(user_id):
+            remaining = self._cooldown_remaining(user_id)
+            await interaction.response.send_message(
+                f"⏳ Please wait {remaining}s before using `/fetch` again.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
 
         # Get stored token
         try:
@@ -354,10 +383,20 @@ class MaimaiNetCog(commands.Cog):
     ])
     async def b50(self, interaction: discord.Interaction, language: Optional[discord.app_commands.Choice[str]] = None):
         """Generate and display the user's best 50 scores."""
-        await interaction.response.defer(ephemeral=False)
-        
         user_id = str(interaction.user.id)
-        
+
+        if self._check_cooldown(user_id):
+            remaining = self._cooldown_remaining(user_id)
+            await interaction.response.send_message(
+                f"⏳ Please wait {remaining}s before using `/b50` again.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=False)
+
+        status_msg = await interaction.followup.send("🔄 Loading your profile...", ephemeral=False)
+
         # Load user profile for language, banner, partner
         profile = await get_profile(user_id)
         
@@ -367,12 +406,26 @@ class MaimaiNetCog(commands.Cog):
         
         # Calculate B50
         calculator = B50Calculator(user_id)
-        top_15, top_35, total_rating = await calculator.get_b50()
+
+        async def on_progress(diff_name, count):
+            await status_msg.edit(
+                content=f"🔄 Fetching scores from maimai NET... **{diff_name}**: {count} scores"
+            )
+
+        async def on_fetch_complete():
+            await status_msg.edit(content="📊 Calculating ratings...")
+
+        top_15, top_35, total_rating = await calculator.get_b50(
+            on_progress=on_progress,
+            on_fetch_complete=on_fetch_complete,
+        )
         
         if not top_15 and not top_35:
-            await interaction.followup.send("No scores found! Please use `/login` and `/fetch` first to download your scores.", ephemeral=True)
+            await status_msg.edit(content="No scores found! Please use `/login` and `/fetch` first to download your scores.")
             return
             
+        await status_msg.edit(content="🎨 Rendering your B50 chart...")
+
         # Get user avatar
         avatar_bytes = None
         if interaction.user.display_avatar:
@@ -402,7 +455,7 @@ class MaimaiNetCog(commands.Cog):
         if calculator.used_cache and calculator.error_message:
             msg = f"⚠️ *{calculator.error_message}*"
             
-        await interaction.followup.send(content=msg, file=file)
+        await status_msg.edit(content=msg, attachments=[file])
 
     # Note: If this is an existing cog with other commands, a command group might be better for settings.
     # We will just add a settings command here for language.
