@@ -8,7 +8,7 @@ from discord.ext import commands
 from typing import Optional
 import time
 
-from utils.database import save_scores, delete_scores, has_scores, get_score_summary, get_profile, set_user_language
+from utils.database import save_scores, delete_scores, has_scores, get_score_summary, get_profile, set_user_language, set_maimai_name
 from utils.maimai_scraper import validate_token, fetch_all_scores, match_scores_to_songs
 from utils.segaid_db import save_token, get_token, delete_token, save_segaid_account, delete_segaid_account
 from utils.segaid_login import login_with_segaid, try_refresh_with_segaid
@@ -54,7 +54,7 @@ class SegaIDLoginModal(discord.ui.Modal):
             return
 
         # Validate the session and get the player name
-        is_valid, validate_msg = await validate_token(clal)
+        is_valid, validate_msg, player_name = await validate_token(clal)
         if not is_valid:
             await interaction.followup.send(f"Login failed: {validate_msg}", ephemeral=True)
             return
@@ -62,6 +62,8 @@ class SegaIDLoginModal(discord.ui.Modal):
         try:
             await save_token(user_id, clal)
             await save_segaid_account(user_id, username, password)
+            if player_name:
+                await set_maimai_name(user_id, player_name)
         except RuntimeError as e:
             await interaction.followup.send(
                 f"Configuration error: {e}\nThe bot owner needs to set TOKEN_SECRET in the .env file.",
@@ -180,7 +182,7 @@ class MaimaiNetCog(commands.Cog):
             clean_token = clean_token[5:]
 
         # Validate the token against maimai NET
-        is_valid, message = await validate_token(clean_token)
+        is_valid, message, player_name = await validate_token(clean_token)
 
         if not is_valid:
             await interaction.followup.send(f"Login failed: {message}", ephemeral=True)
@@ -190,6 +192,8 @@ class MaimaiNetCog(commands.Cog):
         user_id = str(interaction.user.id)
         try:
             await save_token(user_id, clean_token)
+            if player_name:
+                await set_maimai_name(user_id, player_name)
         except RuntimeError as e:
             await interaction.followup.send(
                 f"Configuration error: {e}\nThe bot owner needs to set TOKEN_SECRET in the .env file.",
@@ -436,7 +440,7 @@ class MaimaiNetCog(commands.Cog):
                 pass
                 
         # Render image
-        username = interaction.user.display_name
+        username = profile.get("maimai_name") or interaction.user.display_name
         renderer = B50Renderer(
             username=username,
             language=pref_language,

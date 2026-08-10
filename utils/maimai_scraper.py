@@ -85,7 +85,7 @@ def _find_song_id(
     return entries[0].get("song_id")
 
 
-async def validate_token(cookie: str) -> Tuple[bool, str]:
+async def validate_token(cookie: str) -> Tuple[bool, str, Optional[str]]:
     """Check if a maimai NET clal cookie is valid and get session cookies.
 
     Uses the same flow as tomomai:
@@ -94,7 +94,8 @@ async def validate_token(cookie: str) -> Tuple[bool, str]:
     3. 200 = token expired
 
     Returns:
-        (is_valid, message) tuple
+        (is_valid, message, player_name) tuple.
+        player_name is the user's maimai NET display name, or None on failure.
     """
     try:
         # Clean the cookie value
@@ -122,10 +123,10 @@ async def validate_token(cookie: str) -> Tuple[bool, str]:
             ) as resp:
                 if resp.status == 200:
                     # Got login page = token is invalid/expired
-                    return False, "Token is invalid or expired. Please log in to maimai NET and get a fresh clal cookie."
+                    return False, "Token is invalid or expired. Please log in to maimai NET and get a fresh clal cookie.", None
 
                 if resp.status != 302:
-                    return False, f"Unexpected response from auth server (HTTP {resp.status})"
+                    return False, f"Unexpected response from auth server (HTTP {resp.status})", None
 
                 # Token is valid - get redirect location and cookies
                 redirect_url = resp.headers.get("Location", "")
@@ -151,13 +152,13 @@ async def validate_token(cookie: str) -> Tuple[bool, str]:
                 html = await resp.text()
 
                 if resp.status != 200:
-                    return False, f"HTTP {resp.status} after redirect - URL: {final_url[:60]}"
+                    return False, f"HTTP {resp.status} after redirect - URL: {final_url[:60]}", None
 
                 if "error" in final_url.lower():
-                    return False, f"Redirected to error page: {final_url[:60]}"
+                    return False, f"Redirected to error page: {final_url[:60]}", None
 
                 if "ERROR CODE" in html or "Please login" in html:
-                    return False, "Session could not be established - token may be invalid"
+                    return False, "Session could not be established - token may be invalid", None
 
                 # Try to get player data page
                 async with session.get(
@@ -173,15 +174,15 @@ async def validate_token(cookie: str) -> Tuple[bool, str]:
                     if not name_el:
                         title_el = soup.select_one("title")
                         page_title = title_el.get_text(strip=True) if title_el else "Unknown"
-                        return False, f"Could not find player name. Page: '{page_title}'"
+                        return False, f"Could not find player name. Page: '{page_title}'", None
 
                     player_name = name_el.get_text(strip=True)
-                    return True, f"Logged in as **{player_name}**"
+                    return True, f"Logged in as **{player_name}**", player_name
 
     except asyncio.TimeoutError:
-        return False, "Connection timed out. maimai NET may be under maintenance (4AM-7AM JST)."
+        return False, "Connection timed out. maimai NET may be under maintenance (4AM-7AM JST).", None
     except aiohttp.ClientError as e:
-        return False, f"Connection error: {e}"
+        return False, f"Connection error: {e}", None
 
 
 async def fetch_all_scores(

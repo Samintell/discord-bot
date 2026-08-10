@@ -59,6 +59,7 @@ async def init_db() -> None:
                 partner_id TEXT,
                 header_id TEXT,
                 name_language TEXT DEFAULT 'japanese',
+                maimai_name TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (discord_user_id)
@@ -85,7 +86,13 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE user_profiles ADD COLUMN header_id TEXT")
         except aiosqlite.OperationalError:
             pass # Column already exists
-            
+
+        # Migration: Add maimai_name if it doesn't exist
+        try:
+            await db.execute("ALTER TABLE user_profiles ADD COLUMN maimai_name TEXT")
+        except aiosqlite.OperationalError:
+            pass # Column already exists
+
         await db.commit()
 
 
@@ -298,7 +305,7 @@ async def get_profile(discord_user_id: str) -> Dict:
         await _ensure_profile(db, discord_user_id)
         cursor = await db.execute(
             """
-            SELECT total_correct, total_games, coins_balance, coins_lifetime, banner_id, partner_id, header_id, name_language
+            SELECT total_correct, total_games, coins_balance, coins_lifetime, banner_id, partner_id, header_id, name_language, maimai_name
             FROM user_profiles WHERE discord_user_id = ?
             """,
             (discord_user_id,)
@@ -316,6 +323,7 @@ async def get_profile(discord_user_id: str) -> Dict:
                 "partner_id": None,
                 "header_id": None,
                 "name_language": "japanese",
+                "maimai_name": None,
             }
 
         return {
@@ -327,6 +335,7 @@ async def get_profile(discord_user_id: str) -> Dict:
             "partner_id": row[5],
             "header_id": row[6] if len(row) > 6 else None,
             "name_language": row[7] if len(row) > 7 else "japanese",
+            "maimai_name": row[8] if len(row) > 8 else None,
         }
 
 
@@ -507,5 +516,19 @@ async def set_user_language(discord_user_id: str, language: str) -> None:
             WHERE discord_user_id = ?
             """,
             (language, discord_user_id),
+        )
+        await db.commit()
+
+
+async def set_maimai_name(discord_user_id: str, name: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET maimai_name = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (name, discord_user_id),
         )
         await db.commit()

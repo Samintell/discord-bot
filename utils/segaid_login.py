@@ -92,7 +92,7 @@ async def try_refresh_with_segaid(discord_user_id: str) -> Optional[str]:
         return None
 
     # Confirm the session is valid
-    is_valid, _ = await validate_token(clal)
+    is_valid, _, _ = await validate_token(clal)
     if not is_valid:
         return None
 
