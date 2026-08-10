@@ -16,6 +16,7 @@ from utils.database import (
     list_inventory_items,
     set_profile_banner,
     set_profile_partner,
+    set_profile_header,
 )
 from utils.profile_shop import load_shop_items, get_shop_item
 
@@ -84,7 +85,7 @@ class ShopItemsView(ui.View):
 
         attachment, attachment_url = _build_item_attachment(item, "shop")
         if attachment and attachment_url:
-            if item_type == "banner":
+            if item_type in ("banner", "header"):
                 embed.set_image(url=attachment_url)
             else:
                 embed.set_thumbnail(url=attachment_url)
@@ -92,7 +93,7 @@ class ShopItemsView(ui.View):
 
         image_url = item.get("image_url")
         if image_url:
-            if item_type == "banner":
+            if item_type in ("banner", "header"):
                 embed.set_image(url=image_url)
             else:
                 embed.set_thumbnail(url=image_url)
@@ -211,12 +212,16 @@ class ProfileCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @shop_group.command(name="list", description="List available shop items")
-    @app_commands.describe(item_type="Filter by item type")
+    @app_commands.describe(
+        item_type="Filter by item type",
+        show_owned="Also show items you already own",
+    )
     @app_commands.choices(item_type=[
         app_commands.Choice(name="Banners", value="banner"),
         app_commands.Choice(name="Partners", value="partner"),
+        app_commands.Choice(name="Headers", value="header"),
     ])
-    async def shop_list(self, interaction: discord.Interaction, item_type: Optional[str] = None):
+    async def shop_list(self, interaction: discord.Interaction, item_type: Optional[str] = None, show_owned: bool = False):
         items = load_shop_items()
         item_rows: list[tuple[str, dict]] = []
         owned_ids = set(await list_inventory_items(str(interaction.user.id), item_type=item_type))
@@ -224,12 +229,13 @@ class ProfileCog(commands.Cog):
         for item_id, item in sorted(items.items()):
             if item_type and item.get("type") != item_type:
                 continue
-            if item_id in owned_ids:
+            if item_id in owned_ids and not show_owned:
                 continue
             item_rows.append((item_id, item))
 
         if not item_rows:
-            await interaction.response.send_message("No unowned items found for that filter.", ephemeral=True)
+            msg = "No items found for that filter." if show_owned else "No unowned items found for that filter."
+            await interaction.response.send_message(msg, ephemeral=True)
             return
 
         view = ShopItemsView(
@@ -278,7 +284,7 @@ class ProfileCog(commands.Cog):
         image_url = item.get("image_url")
         attachment, attachment_url = _build_item_attachment(item, "item")
         if attachment and attachment_url:
-            if item_type == "banner":
+            if item_type in ("banner", "header"):
                 embed.set_image(url=attachment_url)
             else:
                 embed.set_thumbnail(url=attachment_url)
@@ -286,7 +292,7 @@ class ProfileCog(commands.Cog):
             return
 
         if image_url:
-            if item_type == "banner":
+            if item_type in ("banner", "header"):
                 embed.set_image(url=image_url)
             else:
                 embed.set_thumbnail(url=image_url)
@@ -349,6 +355,10 @@ class ProfileCog(commands.Cog):
             await set_profile_partner(user_id, item_id)
             await interaction.response.send_message("Partner equipped.", ephemeral=True)
             return
+        if item_type == "header":
+            await set_profile_header(user_id, item_id)
+            await interaction.response.send_message("Header equipped.", ephemeral=True)
+            return
 
         await interaction.response.send_message("That item cannot be equipped.", ephemeral=True)
 
@@ -357,6 +367,7 @@ class ProfileCog(commands.Cog):
     @app_commands.choices(item_type=[
         app_commands.Choice(name="Banners", value="banner"),
         app_commands.Choice(name="Partners", value="partner"),
+        app_commands.Choice(name="Headers", value="header"),
     ])
     async def shop_inventory(self, interaction: discord.Interaction, item_type: Optional[str] = None):
         user_id = str(interaction.user.id)

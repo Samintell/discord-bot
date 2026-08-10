@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 
+from utils.profile_shop import get_shop_item
+
 PROJECT_ROOT = Path(__file__).parent.parent
 IMAGES_DIR = PROJECT_ROOT / "images"
 SHOP_ASSETS_DIR = PROJECT_ROOT / "assets" / "shop"
@@ -13,7 +15,7 @@ SHOP_ASSETS_DIR = PROJECT_ROOT / "assets" / "shop"
 # values are that design space hardcoded at 1.5x scale.
 CANVAS_W, CANVAS_H = 1875, 3030
 HEADER_H = 450
-NAME_RECT = (105, 105, 1200, 360)
+NAME_RECT = (105, 105, 1025, 360)
 AVATAR_RECT = (165, 143, 345, 323)
 USER_POS = (375, 135)
 RATE_RECT = (375, 218, 975, 335)
@@ -104,7 +106,8 @@ def truncate_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeType
 class B50Renderer:
     def __init__(self, username: str, language: str, top_15: List[Dict], top_35: List[Dict], 
                  total_rating: int, avatar_bytes: Optional[bytes] = None, 
-                 banner_id: Optional[str] = None, partner_id: Optional[str] = None):
+                 banner_id: Optional[str] = None, partner_id: Optional[str] = None,
+                 header_id: Optional[str] = None):
         self.username = username
         self.language = language
         self.top_15 = top_15
@@ -113,10 +116,52 @@ class B50Renderer:
         self.avatar_bytes = avatar_bytes
         self.banner_id = banner_id
         self.partner_id = partner_id
+        self.header_id = header_id
         
         self.width = CANVAS_W
         self.height = CANVAS_H
         self.bg_color = (250, 250, 250)
+
+    def _resolve_header_path(self) -> Optional[Path]:
+        """Resolve the equipped header image, falling back to the default."""
+        if self.header_id:
+            item = get_shop_item(self.header_id)
+            if item:
+                image_path = item.get("image_path")
+                if image_path:
+                    path = Path(image_path)
+                    if not path.is_absolute():
+                        path = PROJECT_ROOT / path
+                    if path.exists():
+                        return path
+            path = SHOP_ASSETS_DIR / "header" / f"{self.header_id}.png"
+            if path.exists():
+                return path
+        default = SHOP_ASSETS_DIR / "header" / "default.png"
+        return default if default.exists() else None
+
+    def _load_header(self, width: int, height: int) -> Optional[Image.Image]:
+        """Load the header image, cover-cropped to the given size."""
+        path = self._resolve_header_path()
+        if not path:
+            return None
+        try:
+            header = Image.open(path).convert("RGBA")
+            # Crop to cover the full header band
+            header_aspect = header.width / header.height
+            target_aspect = width / height
+            if header_aspect > target_aspect:
+                new_width = int(header.height * target_aspect)
+                offset = (header.width - new_width) // 2
+                header = header.crop((offset, 0, offset + new_width, header.height))
+            else:
+                new_height = int(header.width / target_aspect)
+                offset = (header.height - new_height) // 2
+                header = header.crop((0, offset, header.width, offset + new_height))
+            return header.resize((width, height), Image.LANCZOS)
+        except Exception as e:
+            print(f"Failed to load header {path}: {e}")
+            return None
 
     def _draw_song_panel(self, song: Dict, width: int, height: int) -> Image.Image:
         panel = Image.new("RGBA", (width, height), (40, 40, 50, 255))
@@ -239,12 +284,11 @@ class B50Renderer:
         
         # Draw Banner / Background header
         header_height = HEADER_H
-        if self.banner_id:
-            # We don't have local banner assets yet unless we load from a URL or static dir
-            # For now, let's draw a gradient or placeholder
-            pass
-            
-        draw.rectangle([0, 0, self.width, header_height], fill=(240, 210, 230))
+        header = self._load_header(self.width, header_height)
+        if header:
+            img.paste(header, (0, 0))
+        else:
+            draw.rectangle([0, 0, self.width, header_height], fill=(240, 210, 230))
         
         # Draw white background wrapper for nameplate
         # Covers from 105,105 to 1200, 360

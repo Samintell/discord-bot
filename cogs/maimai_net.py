@@ -403,6 +403,7 @@ class MaimaiNetCog(commands.Cog):
         pref_language = language.value if language else profile.get("name_language", "japanese")
         banner_id = profile.get("banner_id")
         partner_id = profile.get("partner_id")
+        header_id = profile.get("header_id")
         
         # Calculate B50
         calculator = B50Calculator(user_id)
@@ -444,7 +445,8 @@ class MaimaiNetCog(commands.Cog):
             total_rating=total_rating,
             avatar_bytes=avatar_bytes,
             banner_id=banner_id,
-            partner_id=partner_id
+            partner_id=partner_id,
+            header_id=header_id
         )
         
         img_buffer = renderer.render()

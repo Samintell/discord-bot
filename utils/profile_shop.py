@@ -45,6 +45,14 @@ DEFAULT_SHOP_ITEMS: Dict[str, dict] = {
         "image_url": "https://placehold.co/256x256/png?text=DJ+Pal",
         "description": "Always on the beat.",
     },
+    "header_default": {
+        "type": "header",
+        "name": "Default Header",
+        "price": 0,
+        "image_url": "https://placehold.co/1875x450/png?text=Default+Header",
+        "description": "The default B50 header background.",
+        "image_path": "assets/shop/header/default.png",
+    },
 }
 
 

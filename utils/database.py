@@ -57,6 +57,7 @@ async def init_db() -> None:
                 coins_lifetime INTEGER NOT NULL DEFAULT 0,
                 banner_id TEXT,
                 partner_id TEXT,
+                header_id TEXT,
                 name_language TEXT DEFAULT 'japanese',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -76,6 +77,12 @@ async def init_db() -> None:
         # Migration: Add name_language if it doesn't exist
         try:
             await db.execute("ALTER TABLE user_profiles ADD COLUMN name_language TEXT DEFAULT 'japanese'")
+        except aiosqlite.OperationalError:
+            pass # Column already exists
+
+        # Migration: Add header_id if it doesn't exist
+        try:
+            await db.execute("ALTER TABLE user_profiles ADD COLUMN header_id TEXT")
         except aiosqlite.OperationalError:
             pass # Column already exists
             
@@ -291,7 +298,7 @@ async def get_profile(discord_user_id: str) -> Dict:
         await _ensure_profile(db, discord_user_id)
         cursor = await db.execute(
             """
-            SELECT total_correct, total_games, coins_balance, coins_lifetime, banner_id, partner_id, name_language
+            SELECT total_correct, total_games, coins_balance, coins_lifetime, banner_id, partner_id, header_id, name_language
             FROM user_profiles WHERE discord_user_id = ?
             """,
             (discord_user_id,)
@@ -307,6 +314,7 @@ async def get_profile(discord_user_id: str) -> Dict:
                 "coins_lifetime": 0,
                 "banner_id": None,
                 "partner_id": None,
+                "header_id": None,
                 "name_language": "japanese",
             }
 
@@ -317,7 +325,8 @@ async def get_profile(discord_user_id: str) -> Dict:
             "coins_lifetime": row[3],
             "banner_id": row[4],
             "partner_id": row[5],
-            "name_language": row[6] if len(row) > 6 else "japanese",
+            "header_id": row[6] if len(row) > 6 else None,
+            "name_language": row[7] if len(row) > 7 else "japanese",
         }
 
 
@@ -445,6 +454,20 @@ async def set_profile_partner(discord_user_id: str, partner_id: Optional[str]) -
             WHERE discord_user_id = ?
             """,
             (partner_id, discord_user_id),
+        )
+        await db.commit()
+
+
+async def set_profile_header(discord_user_id: str, header_id: Optional[str]) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_profile(db, discord_user_id)
+        await db.execute(
+            """
+            UPDATE user_profiles
+            SET header_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE discord_user_id = ?
+            """,
+            (header_id, discord_user_id),
         )
         await db.commit()
 
