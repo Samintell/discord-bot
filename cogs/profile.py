@@ -227,6 +227,8 @@ class ProfileCog(commands.Cog):
         owned_ids = set(await list_inventory_items(str(interaction.user.id), item_type=item_type))
 
         for item_id, item in sorted(items.items()):
+            if item.get("hidden"):
+                continue
             if item_type and item.get("type") != item_type:
                 continue
             if item_id in owned_ids and not show_owned:
@@ -263,7 +265,7 @@ class ProfileCog(commands.Cog):
     @app_commands.describe(item_id="Item id to view")
     async def shop_view(self, interaction: discord.Interaction, item_id: str):
         item = get_shop_item(item_id)
-        if not item:
+        if not item or item.get("hidden"):
             await interaction.response.send_message("Item not found.", ephemeral=True)
             return
 
@@ -303,7 +305,7 @@ class ProfileCog(commands.Cog):
     @app_commands.describe(item_id="Item id to buy")
     async def shop_buy(self, interaction: discord.Interaction, item_id: str):
         item = get_shop_item(item_id)
-        if not item:
+        if not item or item.get("hidden"):
             await interaction.response.send_message("Item not found.", ephemeral=True)
             return
 

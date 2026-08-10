@@ -52,6 +52,7 @@ DEFAULT_SHOP_ITEMS: Dict[str, dict] = {
         "image_url": "https://placehold.co/1875x450/png?text=Default+Header",
         "description": "The default B50 header background.",
         "image_path": "assets/shop/header/default.png",
+        "hidden": True,
     },
 }
 
