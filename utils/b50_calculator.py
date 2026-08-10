@@ -196,9 +196,11 @@ class B50Calculator:
             else:
                 old_scores.append(score_data)
 
-        # Sort descending by rating
-        new_scores.sort(key=lambda x: x['rating'], reverse=True)
-        old_scores.sort(key=lambda x: x['rating'], reverse=True)
+        # Sort descending by rating; tiebreak by internal level, then accuracy
+        def sort_key(s):
+            return (s['rating'], s['level'], s['achievement'])
+        new_scores.sort(key=sort_key, reverse=True)
+        old_scores.sort(key=sort_key, reverse=True)
 
         top_15_new = new_scores[:15]
         top_35_old = old_scores[:35]

@@ -361,3 +361,13 @@ The bookmarklet reads `document.cookie` on the maimai NET page, finds the `clal`
 - Install new dependencies: `pip install -r requirements.txt`
 - The `maimai_data.db` file persists across bot restarts; back up if needed
 - maimai NET cookies expire periodically; users will need to `/login` again when their cookie expires
+- Remote host: `REMOTE_HOST=mai-quiz-bot` in `.env` (local SSH alias; SSH user is
+  `samin`, code runs as `botuser` under systemd — sudo required for writes to
+  `/home/botuser/discord-bot`). Deploy code by pushing to `origin/main` then
+  `sudo -u botuser git -C /home/botuser/discord-bot pull origin main`.
+- `scripts/update_remote.py` syncs config/audio/assets but its direct
+  `scp`/`ssh` calls run as the SSH user (no sudo), so permission errors are
+  expected; push files to `/tmp` then move with
+  `ssh mai-quiz-bot "sudo mv /tmp/<file> /home/botuser/discord-bot/..."`.
+- Restart after deploying:
+  `ssh mai-quiz-bot "sudo systemctl restart maimai-bot maimai-admin-bot"`.
