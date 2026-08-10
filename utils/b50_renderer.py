@@ -271,7 +271,7 @@ class B50Renderer:
         level_str = str(song.get("level", 0))
         level_font = get_font(30, bold=True, family="english")
         l_w = get_width(level_font, level_str)
-        draw.text((width - l_w - 12, height - 105), level_str, font=level_font, fill=(255, 255, 255))
+        draw.text((width - l_w - 12, height - 90), level_str, font=level_font, fill=(255, 255, 255))
         
         # Draw a neat border around the whole panel
         draw.rectangle([0, 0, width-1, height-1], outline=(200, 200, 200), width=2)

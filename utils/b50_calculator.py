@@ -3,6 +3,7 @@ import asyncio
 from typing import Dict, List, Tuple
 from utils.database import save_scores
 from utils.segaid_db import get_token
+from utils.segaid_login import try_refresh_with_segaid
 from utils.maimai_scraper import fetch_all_scores, match_scores_to_songs
 from utils.song_loader import _get_all_songs
 from utils.config_manager import get_b50_active_versions
@@ -49,6 +50,7 @@ class B50Calculator:
     def __init__(self, discord_user_id: str):
         self.discord_user_id = discord_user_id
         self.used_cache = False
+        self.refreshed_session = False
         self.error_message = None
 
     async def get_b50(
@@ -77,13 +79,24 @@ class B50Calculator:
             try:
                 # We can't use progress callbacks easily here as we just want silent fetching
                 raw_scores = await fetch_all_scores(token, on_progress=on_progress)
+                if not raw_scores:
+                    # Session may have expired - try refreshing via saved SEGA ID login
+                    new_token = await try_refresh_with_segaid(self.discord_user_id)
+                    if new_token:
+                        self.refreshed_session = True
+                        raw_scores = await fetch_all_scores(new_token, on_progress=on_progress)
                 if raw_scores:
                     matched_scores, _ = match_scores_to_songs(raw_scores)
                     await save_scores(self.discord_user_id, matched_scores)
                     scores = matched_scores
                 else:
                     self.used_cache = True
-                    self.error_message = "No scores found on maimai NET, using cached data."
+                    self.error_message = (
+                        "No scores found on maimai NET, using cached data."
+                        if self.refreshed_session
+                        else "Your maimai NET session appears to have expired, using cached data. "
+                             "Run `/fetch` to refresh your session or `/login` with a fresh clal cookie."
+                    )
             except Exception as e:
                 self.used_cache = True
                 self.error_message = f"Failed to fetch from maimai NET ({e}), using cached data."

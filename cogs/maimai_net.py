@@ -454,6 +454,8 @@ class MaimaiNetCog(commands.Cog):
         file = discord.File(fp=img_buffer, filename="b50.png")
         
         msg = ""
+        if calculator.refreshed_session:
+            msg = "🔄 *Your expired maimai NET session was refreshed automatically via SEGA ID.*"
         if calculator.used_cache and calculator.error_message:
             msg = f"⚠️ *{calculator.error_message}*"
             
