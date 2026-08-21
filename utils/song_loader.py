@@ -179,25 +179,37 @@ def get_song_chart_path(song: Dict, difficulty: str = "master") -> Optional[Path
     if not song_id:
         return None
 
-    # Chart files stored as: charts/{song_id}_{difficulty}.txt
+    # Chart type-specific files are stored as: charts/{song_id}_{difficulty}_{type}.txt
+    # (std and dx charts for the same song are separate files)
+    chart_type = (song.get('type') or 'std').lower()
+
     # Sanitize filename the same way as download_charts.py
     clean_id = song_id
     invalid_chars = '<>:"/\\|?*'
     for ch in invalid_chars:
         clean_id = clean_id.replace(ch, '_')
 
-    chart_filename = f"{clean_id}_{difficulty}.txt"
+    # 1. Type-specific chart file
+    chart_filename = f"{clean_id}_{difficulty}_{chart_type}.txt"
     chart_path = PROJECT_ROOT / "charts" / chart_filename
-
     if chart_path.exists():
         return chart_path
 
-    # Fallback: try remaster if master not found
+    # 2. Legacy shared file (pre-type-aware naming, e.g. songs with a single chart)
+    legacy_filename = f"{clean_id}_{difficulty}.txt"
+    legacy_path = PROJECT_ROOT / "charts" / legacy_filename
+    if legacy_path.exists():
+        return legacy_path
+
+    # 3. Fallback: try remaster if master not found
     if difficulty == "master":
-        remaster_filename = f"{clean_id}_remaster.txt"
-        remaster_path = PROJECT_ROOT / "charts" / remaster_filename
-        if remaster_path.exists():
-            return remaster_path
+        type_remaster_path = PROJECT_ROOT / "charts" / f"{clean_id}_remaster_{chart_type}.txt"
+        if type_remaster_path.exists():
+            return type_remaster_path
+
+        legacy_remaster_path = PROJECT_ROOT / "charts" / f"{clean_id}_remaster.txt"
+        if legacy_remaster_path.exists():
+            return legacy_remaster_path
 
     return None
 

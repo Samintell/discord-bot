@@ -1,6 +1,9 @@
 """
 Script to download and process chart data from the Maichart-Converts GitHub repository.
 Extracts Master and Re:Master simai chart data for use in chart quiz mode.
+
+SD and DX chart variants of the same song are saved separately as
+charts/{song_id}_{difficulty}_{type}.txt (type is "std" or "dx").
 """
 
 import json
@@ -204,6 +207,21 @@ def sanitize_filename(name: str) -> str:
     return name.strip()
 
 
+def detect_chart_type(chart_title: str) -> str:
+    """Detect the chart variant type from a maidata title ([DX], [SD], [宴], ...).
+
+    The variant tag is the last [...] suffix (e.g. "Quartet Theme [Reborn][SD]").
+
+    Returns:
+        "dx", "std", or the raw tag lowercased for other variants (e.g. "utage").
+    """
+    tags = re.findall(r"\[([^\]]+)\]", chart_title)
+    if tags:
+        tag = tags[-1].lower()
+        return {"dx": "dx", "sd": "std"}.get(tag, tag)
+    return "std"
+
+
 def build_song_indexes(songs: List[Dict]) -> Tuple[Dict, Dict]:
     """
     Build lookup indexes from output.json songs.
@@ -389,58 +407,38 @@ def process_all_charts():
 
             stats["matched"] += 1
 
-            # Check if we already have this song (avoid duplicates from SD/DX variants)
-            # Keep both if chart data differs, prefer DX version
-            existing = chart_index.get(song_id)
+            chart_type = detect_chart_type(chart_title)
 
-            # Process Master (inote_5)
+            if song_id not in chart_index:
+                chart_index[song_id] = {
+                    "song_id": song_id,
+                    "master": {},
+                    "remaster": {},
+                    "bpm": maidata.get("wholebpm", ""),
+                }
+            song_entry = chart_index[song_id]
+
+            # Process Master (inote_5).
+            # Each chart variant (SD/DX) gets its own file so std and dx
+            # charts for the same song stay separate.
             master_data = extract_chart_data(maidata, "master")
             if master_data:
-                filename = sanitize_filename(f"{song_id}_master.txt")
+                filename = sanitize_filename(f"{song_id}_master_{chart_type}.txt")
                 chart_path = CHARTS_DIR / filename
-
-                # If we already have this song, skip SD if we already have DX
-                should_write = True
-                if existing and existing.get("master"):
-                    # Prefer DX charts (they have [DX] in the title)
-                    if "[DX]" in chart_title:
-                        should_write = True
-                    elif "[SD]" in chart_title:
-                        should_write = False
-
-                if should_write:
-                    simai_str = build_simai_string(maidata, master_data, "master")
-                    chart_path.write_text(simai_str, encoding="utf-8")
-                    stats["charts_saved"] += 1
-
-                    if song_id not in chart_index:
-                        chart_index[song_id] = {
-                            "song_id": song_id,
-                            "master": filename,
-                            "remaster": None,
-                            "bpm": maidata.get("wholebpm", ""),
-                        }
-                    else:
-                        chart_index[song_id]["master"] = filename
+                simai_str = build_simai_string(maidata, master_data, "master")
+                chart_path.write_text(simai_str, encoding="utf-8")
+                stats["charts_saved"] += 1
+                song_entry["master"][chart_type] = filename
 
             # Process Re:Master (inote_6)
             remaster_data = extract_chart_data(maidata, "remaster")
             if remaster_data:
-                filename = sanitize_filename(f"{song_id}_remaster.txt")
+                filename = sanitize_filename(f"{song_id}_remaster_{chart_type}.txt")
                 chart_path = CHARTS_DIR / filename
                 simai_str = build_simai_string(maidata, remaster_data, "remaster")
                 chart_path.write_text(simai_str, encoding="utf-8")
                 stats["charts_saved"] += 1
-
-                if song_id not in chart_index:
-                    chart_index[song_id] = {
-                        "song_id": song_id,
-                        "master": None,
-                        "remaster": filename,
-                        "bpm": maidata.get("wholebpm", ""),
-                    }
-                else:
-                    chart_index[song_id]["remaster"] = filename
+                song_entry["remaster"][chart_type] = filename
 
     # Save chart index
     with open(CHART_INDEX_FILE, "w", encoding="utf-8") as f:
@@ -483,12 +481,12 @@ def process_all_charts():
                 if sid not in chart_index:
                     chart_index[sid] = {
                         "song_id": sid,
-                        "master": filename,
-                        "remaster": None,
+                        "master": {"mainotes": filename},
+                        "remaster": {},
                         "bpm": "",
                     }
                 else:
-                    chart_index[sid]["master"] = filename
+                    chart_index[sid]["master"] = {"mainotes": filename}
                 mainotes_fetched += 1
                 stats["charts_saved"] += 1
 
@@ -502,12 +500,12 @@ def process_all_charts():
                 if sid not in chart_index:
                     chart_index[sid] = {
                         "song_id": sid,
-                        "master": None,
-                        "remaster": filename,
+                        "master": {},
+                        "remaster": {"mainotes": filename},
                         "bpm": "",
                     }
                 else:
-                    chart_index[sid]["remaster"] = filename
+                    chart_index[sid]["remaster"] = {"mainotes": filename}
                 if not master_simai:  # Only count if we didn't already count for master
                     mainotes_fetched += 1
                 stats["charts_saved"] += 1
