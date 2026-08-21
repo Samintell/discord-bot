@@ -11,7 +11,7 @@ Discord bot for playing "Guess the Song" using MaiMai rhythm game data. Users ar
 - **Song Database**: `output.json` contains 21,494+ song entries with metadata
 - **Image Assets**: `images/` folder with 1,700+ PNG cover art files
 - **Audio Assets**: `audio/` folder with MP3 files (same base name as images)
-- **Chart Assets**: `charts/` folder with processed simai chart files (one per song per difficulty)
+- **Chart Assets**: `charts/` folder with processed simai chart files (one per song per difficulty per type: `{song_id}_{difficulty}_{type}.txt`)
 - **Discord Interface**: Slash commands (`/quiz`, `/skip`, `/stop`, etc.) and prefix commands (`q>quiz`, `q>skip`, etc.)
 
 ### Song Data Structure
@@ -177,7 +177,10 @@ class GameSession:
 
 ### Chart Handling
 - Chart data downloaded from Maichart-Converts GitHub repo via `scripts/download_charts.py`
-- Processed simai chart files stored in `charts/` folder as `{song_id}_{difficulty}.txt`
+- Processed simai chart files stored in `charts/` as `{song_id}_{difficulty}_{type}.txt`
+  (`type` = `std`/`dx`; SD and DX variants of the same song are separate files)
+- `get_song_chart_path()` resolves the type-specific file, falling back to the
+  legacy `{song_id}_{difficulty}.txt` name for songs with a single chart
 - `charts/chart_index.json` maps song_ids to available chart file paths
 - GIF rendering via Playwright + mai-notes.com player (`utils/chart_renderer.py`)
 - `ChartRenderer` class manages browser lifecycle (lazy init, reused across rounds)
@@ -365,9 +368,9 @@ The bookmarklet reads `document.cookie` on the maimai NET page, finds the `clal`
   `samin`, code runs as `botuser` under systemd — sudo required for writes to
   `/home/botuser/discord-bot`). Deploy code by pushing to `origin/main` then
   `sudo -u botuser git -C /home/botuser/discord-bot pull origin main`.
-- `scripts/update_remote.py` syncs config/audio/assets but its direct
-  `scp`/`ssh` calls run as the SSH user (no sudo), so permission errors are
-  expected; push files to `/tmp` then move with
-  `ssh mai-quiz-bot "sudo mv /tmp/<file> /home/botuser/discord-bot/..."`.
+- `scripts/update_remote.py` syncs config/audio/assets to the remote. The SSH
+  user cannot access `/home/botuser/discord-bot`, so the script reads via
+  `ssh <host> sudo cat`, writes via `/tmp` staging + `sudo mv`, and re-owns to
+  `botuser:botuser` (passwordless sudo required).
 - Restart after deploying:
   `ssh mai-quiz-bot "sudo systemctl restart maimai-bot maimai-admin-bot"`.

@@ -62,10 +62,11 @@ or downloaded assets. Song data queries go through `utils/song_loader.py`.
   `sudo -u botuser git -C /home/botuser/discord-bot pull origin main`.
 - `scripts/update_remote.py` syncs `config/`, `new_songs/` audio, and `assets/`
   to the remote. `REMOTE_HOST` is used directly by `scp`/`ssh`, so it also
-  needs the `mai-quiz-bot` alias — but note it writes to
-  `/home/botuser/discord-bot` as the SSH user, which requires sudo. If a run
-  fails with permission errors, push files to `/tmp` via `scp` then move them
-  with `ssh mai-quiz-bot "sudo mv /tmp/<file> /home/botuser/discord-bot/..."`.
+  needs the `mai-quiz-bot` alias. The SSH user (`samin`) cannot access
+  `/home/botuser/discord-bot`, so the script handles this itself: remote reads
+  via `ssh <host> sudo cat`, writes via `/tmp` staging + `sudo mv` (passwordless
+  sudo required), and re-owns files to `botuser:botuser`. Failed pulls are
+  reported and skipped, never merged as empty over local config.
 - Restart after deploying: `ssh mai-quiz-bot "sudo systemctl restart maimai-bot maimai-admin-bot"`.
 - `assets/` is gitignored; the generated header/art assets must be synced to
   the server separately (e.g. `scripts/update_remote.py` step 3 or manual scp).

@@ -1,10 +1,14 @@
 """
 Update script to sync audio files and config between local and remote server.
 
-Remote host is read from REMOTE_HOST in .env or the environment.
+Remote host is read from REMOTE_HOST in .env or the environment. The SSH
+login user cannot write to the bot's home directory, so all remote writes
+go through /tmp staging + `sudo mv` (passwordless sudo required); remote
+reads use `sudo cat`.
 
 Operations (default):
-1. Pull remote config files and merge with local (remote wins on conflict)
+1. Pull remote config files (aliases/translations replace local entirely,
+   remote wins on conflict)
 2. Push local profile_shop.json to remote (overrides remote)
 3. Push merged config files back to remote
 4. Copy audio files from new_songs/ to remote audio/ directory
@@ -73,7 +77,7 @@ def parse_args() -> argparse.Namespace:
 def run_cmd(cmd, check=True):
     """Run a shell command and return the result."""
     print(f"  $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if check and result.returncode != 0:
         print(f"  STDERR: {result.stderr.strip()}")
         raise RuntimeError(f"Command failed (exit {result.returncode}): {' '.join(cmd)}")
@@ -81,30 +85,40 @@ def run_cmd(cmd, check=True):
 
 
 def scp_pull(remote_path, local_path):
-    """Pull a file from remote via scp."""
-    run_cmd(["scp", f"{REMOTE_HOST}:{remote_path}", str(local_path)], check=False)
+    """Pull a file from remote via sudo cat (remote dirs are not readable by the SSH user)."""
+    result = run_cmd(["ssh", REMOTE_HOST, "sudo", "cat", remote_path], check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to pull {remote_path}: {result.stderr.strip()}")
+    Path(local_path).write_text(result.stdout, encoding="utf-8")
 
 
 def scp_push(local_path, remote_path):
-    """Push a file to remote via scp."""
-    run_cmd(["scp", str(local_path), f"{REMOTE_HOST}:{remote_path}"])
+    """Push a file to remote via /tmp staging + sudo mv (remote dirs are root-only)."""
+    tmp_path = f"/tmp/{Path(local_path).name}"
+    run_cmd(["scp", str(local_path), f"{REMOTE_HOST}:{tmp_path}"])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "mv", "-f", tmp_path, remote_path])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "chown", "botuser:botuser", remote_path])
 
 
 def scp_push_dir(local_dir, remote_dir):
-    """Push a directory's contents to remote via scp."""
+    """Push a directory's contents to remote via /tmp staging + sudo mv."""
     files = list(local_dir.iterdir())
     if not files:
         print(f"  (no files in {local_dir})")
         return 0
     file_args = [str(f) for f in files if f.is_file()]
     if file_args:
-        run_cmd(["scp"] + file_args + [f"{REMOTE_HOST}:{remote_dir}/"])
+        for f in file_args:
+            tmp_path = f"/tmp/{Path(f).name}"
+            run_cmd(["scp", f, f"{REMOTE_HOST}:{tmp_path}"])
+            run_cmd(["ssh", REMOTE_HOST, "sudo", "mv", "-f", tmp_path, remote_dir])
     return len(file_args)
 
 
 def ensure_remote_dir(remote_dir):
-    """Ensure a directory exists on the remote host."""
-    run_cmd(["ssh", REMOTE_HOST, "mkdir", "-p", remote_dir])
+    """Ensure a directory exists on the remote (created as botuser via sudo)."""
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "mkdir", "-p", remote_dir])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "chown", "-R", "botuser:botuser", remote_dir])
 
 
 def load_json(path):
@@ -125,29 +139,14 @@ def save_json(path, data):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def merge_dicts(local, remote):
-    """Merge two dicts. Remote entries win on key conflict."""
-    merged = dict(local)
-    merged.update(remote)
-    return merged
-
-
-def merge_alias_dicts(local, remote):
-    """Merge alias dicts (dict of lists). Combines lists per key, deduplicates."""
-    all_keys = set(list(local.keys()) + list(remote.keys()))
-    merged = {}
-    for key in sorted(all_keys):
-        local_aliases = local.get(key, [])
-        remote_aliases = remote.get(key, [])
-        combined = list(dict.fromkeys(local_aliases + remote_aliases))
-        if combined:
-            merged[key] = combined
-    return merged
-
-
 def prefer_local(local, remote):
     """Keep local data and ignore remote for overrides like profile_shop.json."""
     return local
+
+
+def prefer_remote(local, remote):
+    """Replace local data entirely with the remote's version."""
+    return remote
 
 
 def sync_configs():
@@ -156,9 +155,9 @@ def sync_configs():
     config_dir.mkdir(exist_ok=True)
 
     config_files = {
-        "known_translations.json": merge_dicts,
-        "romaji_overrides.json": merge_dicts,
-        "aliases.json": merge_alias_dicts,
+        "known_translations.json": prefer_remote,
+        "romaji_overrides.json": prefer_remote,
+        "aliases.json": prefer_remote,
         "profile_shop.json": prefer_local,
     }
 
@@ -172,23 +171,29 @@ def sync_configs():
 
             print(f"\n  Syncing {filename}...")
 
-            # Pull remote version
-            scp_pull(remote_path, tmp_path)
-
             local_data = load_json(local_path)
-            remote_data = load_json(tmp_path)
+
+            # Pull remote version (raises if it can't be read)
+            try:
+                scp_pull(remote_path, tmp_path)
+                remote_data = load_json(tmp_path)
+            except RuntimeError as e:
+                print(f"    WARNING: could not pull remote copy: {e}")
+                print("    Keeping local file and pushing it to remote.")
+                remote_data = None
 
             local_count = len(local_data)
-            remote_count = len(remote_data)
+            remote_count = len(remote_data) if remote_data is not None else "n/a"
 
-            # Merge
-            merged = merge_fn(local_data, remote_data)
+            # Merge (only when the remote copy was actually read)
+            if remote_data is not None:
+                merged = merge_fn(local_data, remote_data)
+                save_json(local_path, merged)
+            else:
+                merged = local_data
             merged_count = len(merged)
 
             print(f"    Local: {local_count}, Remote: {remote_count}, Merged: {merged_count}")
-
-            # Save merged locally
-            save_json(local_path, merged)
 
             # Push merged to remote
             scp_push(local_path, remote_path)
@@ -224,10 +229,14 @@ def push_new_audio():
             shutil.copy2(f, dest)
             print(f"    Copied to local audio/: {f.name}")
 
-    # Push to remote
+    # Push to remote via /tmp staging + sudo mv
     remote_audio = f"{REMOTE_DIR}/audio"
-    file_args = [str(f) for f in audio_files]
-    run_cmd(["scp"] + file_args + [f"{REMOTE_HOST}:{remote_audio}/"])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "mkdir", "-p", remote_audio])
+    for f in audio_files:
+        tmp_path = f"/tmp/{f.name}"
+        run_cmd(["scp", str(f), f"{REMOTE_HOST}:{tmp_path}"])
+        run_cmd(["ssh", REMOTE_HOST, "sudo", "mv", "-f", tmp_path, remote_audio])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "chown", "-R", "botuser:botuser", remote_audio])
     print(f"  Uploaded {len(audio_files)} file(s) to remote audio/.")
 
 
@@ -244,8 +253,14 @@ def push_assets():
         return
 
     remote_assets = f"{REMOTE_DIR}/assets"
-    ensure_remote_dir(remote_assets)
-    run_cmd(["scp", "-r", str(local_assets), f"{REMOTE_HOST}:{REMOTE_DIR}/"])
+    staging = "/tmp/assets_sync"
+
+    print("  Staging assets/ to /tmp on remote...")
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "rm", "-rf", staging])
+    run_cmd(["scp", "-r", str(local_assets), f"{REMOTE_HOST}:{staging}"])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "rm", "-rf", remote_assets])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "mv", "-T", "-f", staging, remote_assets])
+    run_cmd(["ssh", REMOTE_HOST, "sudo", "chown", "-R", "botuser:botuser", remote_assets])
     print("  Synced assets/ to remote.")
 
 
